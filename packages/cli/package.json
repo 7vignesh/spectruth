@@ -1,0 +1,26 @@
+{
+  "name": "@spectruth/cli",
+  "version": "0.1.0",
+  "description": "CLI tool for SpecTruth spec conformance verification",
+  "type": "module",
+  "bin": {
+    "spectruth": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node ./dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@spectruth/core": "workspace:*",
+    "commander": "12.1.0",
+    "chalk": "5.4.1",
+    "ora": "8.1.1"
+  },
+  "devDependencies": {
+    "typescript": "5.7.2",
+    "@types/node": "22.10.2"
+  }
+}

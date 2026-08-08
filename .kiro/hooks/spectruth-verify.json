@@ -1,0 +1,13 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "SpecTruth Auto-Verify",
+      "trigger": "PostTaskExec",
+      "action": {
+        "type": "command",
+        "command": "npx spectruth verify --spec .kiro/specs/*/requirements.md --code ./src"
+      }
+    }
+  ]
+}

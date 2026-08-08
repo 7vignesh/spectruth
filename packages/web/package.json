@@ -1,0 +1,10 @@
+{
+  "name": "@spectruth/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web UI for SpecTruth — visual spec conformance reports",
+  "scripts": {
+    "dev": "echo 'Web UI setup pending — coming Day 6'",
+    "build": "echo 'Web UI setup pending — coming Day 6'"
+  }
+}
