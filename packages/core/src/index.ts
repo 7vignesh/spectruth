@@ -1,15 +1,20 @@
 /**
- * @spectruth/core
- *
- * Core verification engine for SpecTruth.
- * Parses Kiro specs, retrieves relevant code, verifies conformance via LLM,
- * and produces structured reports.
+ * @spectruth/core — evidence-backed Done Integrity engine.
  */
 
-// Types
 export * from './types.js';
 
-// Pipeline stages
+export { createCriterionAudit, EVIDENCE_STATES } from './domain/audit.js';
+export type { CreateCriterionAuditInput } from './domain/audit.js';
+export {
+  countEvidenceStates,
+  deriveRequirementState,
+  deriveShipStatus,
+  isSecuritySensitiveCriterion,
+  SHIP_STATUSES,
+  stateForAbsentImplementation,
+} from './domain/policy.js';
+
 export { parseSpec } from './parser/index.js';
 export { findRelevantCode, extractKeywords, walkFileTree } from './retriever/index.js';
 export {
@@ -27,7 +32,6 @@ export {
 } from './verifier/provider.js';
 export { runStaticChecks } from './verifier/static-checks.js';
 
-// Reporting
 export {
   generateReport,
   formatTerminalReport,
@@ -38,7 +42,6 @@ export {
 } from './reporter/index.js';
 export type { OutputFormat } from './reporter/index.js';
 
-// Orchestration — the main entry point
 export {
   verify,
   loadSpec,

@@ -1,88 +1,80 @@
 /**
- * JSON Reporter
- *
- * Formats verification reports as structured JSON for programmatic use:
- * - CI pipelines
- * - Web UI consumption
- * - Storing verification history
+ * Structured reporters for Done Integrity audit reports.
  */
 
-import type { VerificationReport } from '../types.js';
+import type { AuditReport } from '../types.js';
 
-/**
- * Format a verification report as pretty-printed JSON.
- */
-export function formatJSONReport(report: VerificationReport): string {
+export function formatJSONReport(report: AuditReport): string {
   return JSON.stringify(report, null, 2);
 }
 
-/**
- * Format a verification report as a compact coverage matrix in JSON.
- * Flattens the nested structure into a table-friendly array.
- */
-export function formatMatrixJSON(report: VerificationReport): string {
-  const rows = report.results.flatMap(result =>
-    result.criteriaResults.map(cr => ({
-      requirementId: result.requirement.id,
-      requirementTitle: result.requirement.title,
-      criterionId: cr.criterion.id,
-      criterion: cr.criterion.text,
-      status: cr.verdict,
-      confidence: cr.confidence,
-      evidenceFile: cr.evidence.file || null,
-      evidenceLine: cr.evidence.line || null,
-      reason: cr.reason,
-      action: cr.suggestion || null,
-    }))
+/** Flatten findings without dropping their justification or evidence chain. */
+export function formatMatrixJSON(report: AuditReport): string {
+  const rows = report.requirements.flatMap(requirement =>
+    requirement.criteria.map(criterion => ({
+      requirementId: requirement.requirement.id,
+      requirementTitle: requirement.requirement.title,
+      criterionId: criterion.criterionId,
+      criterionText: criterion.criterionText,
+      state: criterion.state,
+      justification: criterion.justification,
+      evidence: criterion.evidence,
+      gaps: criterion.gaps,
+      repairPreviewAvailable: criterion.repairPreviewAvailable,
+    })),
   );
 
   return JSON.stringify(
     {
+      scope: report.scope,
       spec: report.specTitle,
       timestamp: report.timestamp,
       codebase: report.codebasePath,
       summary: report.summary,
-      matrix: rows,
+      truthMap: rows,
     },
     null,
-    2
+    2,
   );
 }
 
 /**
- * Format as GitHub Actions annotations (for CI integration).
- * Outputs ::error and ::warning commands that GitHub renders in PR checks.
+ * Format findings as GitHub Actions annotations. This remains a deterministic
+ * serialization; CI gate behavior itself is outside Increment 1.
  */
-export function formatGitHubAnnotations(report: VerificationReport): string {
+export function formatGitHubAnnotations(report: AuditReport): string {
   const lines: string[] = [];
 
-  for (const result of report.results) {
-    for (const cr of result.criteriaResults) {
-      if (cr.verdict === 'PASS') continue;
+  for (const requirement of report.requirements) {
+    for (const criterion of requirement.criteria) {
+      if (criterion.state === 'SUPPORTED') continue;
 
-      const level = cr.verdict === 'FAIL' ? 'error' : 'warning';
-      const file = cr.evidence.file || 'unknown';
-      const line = cr.evidence.line || 1;
-      const title = `${result.requirement.id}: ${cr.criterion.id}`;
-      const message = `${cr.reason}${cr.suggestion ? ` — ${cr.suggestion}` : ''}`;
+      const level = criterion.state === 'UNVERIFIED' ? 'warning' : 'error';
+      const locatedEvidence = criterion.evidence.find(item => item.location);
+      const file = locatedEvidence?.location?.file ?? 'unknown';
+      const line = locatedEvidence?.location?.line ?? 1;
+      const title = `${requirement.requirement.id}: ${criterion.criterionId} [${criterion.state}]`;
+      const gaps = criterion.gaps.length > 0
+        ? ` Gaps: ${criterion.gaps.join('; ')}`
+        : '';
+      const message = `${criterion.justification}${gaps}`;
 
       lines.push(
-        `::${level} file=${file},line=${line},title=${title}::${escapeAnnotation(message)}`
+        `::${level} file=${file},line=${line},title=${title}::${escapeAnnotation(message)}`,
       );
     }
   }
 
-  // Summary line
-  const { summary } = report;
+  const { states, shipStatus } = report.summary;
   lines.push(
-    `::notice title=SpecTruth Result::${summary.overallScore} — ` +
-    `${summary.passed} passed, ${summary.partial} partial, ${summary.failed} failed`
+    `::notice title=SpecTruth Ship Decision::${shipStatus} — ` +
+    `${states.supported} supported, ${states.partial} partial, ` +
+    `${states.unsupported} unsupported, ${states.unverified} unverified`,
   );
 
   return lines.join('\n');
 }
 
-/** Escape special characters in GitHub Actions annotations */
 function escapeAnnotation(text: string): string {
   return text
     .replace(/%/g, '%25')

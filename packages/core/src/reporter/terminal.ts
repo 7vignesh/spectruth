@@ -1,20 +1,14 @@
 /**
- * Terminal Reporter
- *
- * Formats verification reports for terminal output.
- * Uses ANSI escape codes directly (no chalk dependency in core).
- *
- * Output includes:
- * - Header with spec title and metadata
- * - Per-requirement verdict with criteria breakdown
- * - Evidence with file:line references
- * - Remediation tasks for failures
- * - Summary with overall score
+ * Terminal reporter for evidence-backed Done Integrity audit reports.
  */
 
-import type { VerificationReport, RequirementResult, CriterionResult, Verdict } from '../types.js';
-
-// ─── ANSI Color Codes ────────────────────────────────────────────────────────
+import type {
+  AuditReport,
+  CriterionAudit,
+  EvidenceState,
+  RequirementAudit,
+  ShipStatus,
+} from '../types.js';
 
 const c = {
   reset: '\x1b[0m',
@@ -28,218 +22,187 @@ const c = {
   gray: '\x1b[90m',
 };
 
-/** Detect if colors should be disabled (CI, no TTY, NO_COLOR env) */
 function shouldUseColor(): boolean {
   if (process.env.NO_COLOR) return false;
   if (process.env.FORCE_COLOR) return true;
   return process.stdout.isTTY ?? false;
 }
 
-/** Apply color only if supported */
 function color(text: string, ...codes: string[]): string {
   if (!shouldUseColor()) return text;
   return codes.join('') + text + c.reset;
 }
 
-// ─── Verdict Symbols ─────────────────────────────────────────────────────────
-
-function verdictSymbol(verdict: Verdict): string {
-  switch (verdict) {
-    case 'PASS': return color('PASS', c.green, c.bold);
-    case 'FAIL': return color('FAIL', c.red, c.bold);
-    case 'PARTIAL': return color('PARTIAL', c.yellow, c.bold);
+function stateLabel(state: EvidenceState): string {
+  switch (state) {
+    case 'SUPPORTED': return color(state, c.green, c.bold);
+    case 'PARTIAL': return color(state, c.yellow, c.bold);
+    case 'UNSUPPORTED': return color(state, c.red, c.bold);
+    case 'UNVERIFIED': return color(state, c.blue, c.bold);
   }
 }
 
-function verdictIcon(verdict: Verdict): string {
-  switch (verdict) {
-    case 'PASS': return color('+', c.green, c.bold);
-    case 'FAIL': return color('x', c.red, c.bold);
+function stateIcon(state: EvidenceState): string {
+  switch (state) {
+    case 'SUPPORTED': return color('+', c.green, c.bold);
     case 'PARTIAL': return color('~', c.yellow, c.bold);
+    case 'UNSUPPORTED': return color('x', c.red, c.bold);
+    case 'UNVERIFIED': return color('?', c.blue, c.bold);
   }
 }
 
-// ─── Main Formatter ──────────────────────────────────────────────────────────
+function shipLabel(status: ShipStatus): string {
+  switch (status) {
+    case 'READY': return color(status, c.green, c.bold);
+    case 'REVIEW_REQUIRED': return color(status, c.yellow, c.bold);
+    case 'BLOCKED': return color(status, c.red, c.bold);
+  }
+}
 
-/**
- * Format a verification report for terminal output.
- */
-export function formatTerminalReport(report: VerificationReport): string {
+export function formatTerminalReport(report: AuditReport): string {
   const lines: string[] = [];
-  const divider = color('─'.repeat(72), c.gray);
+  const divider = color('─'.repeat(88), c.gray);
 
-  // Header
   lines.push('');
-  lines.push(color(' SpecTruth', c.cyan, c.bold) + color(' — Spec Conformance Report', c.bold));
+  lines.push(color(' SpecTruth', c.cyan, c.bold) + color(' — Done Integrity Audit', c.bold));
   lines.push(divider);
   lines.push('');
+  lines.push(`  ${color('Scope:', c.dim)}     ${formatScope(report)}`);
   lines.push(`  ${color('Spec:', c.dim)}      ${report.specTitle}`);
   lines.push(`  ${color('Codebase:', c.dim)}  ${report.codebasePath}`);
-  lines.push(`  ${color('Verified:', c.dim)}  ${new Date(report.timestamp).toLocaleString()}`);
+  lines.push(`  ${color('Audited:', c.dim)}   ${new Date(report.timestamp).toLocaleString()}`);
   lines.push('');
   lines.push(divider);
   lines.push('');
 
-  // Per-requirement results
-  for (const result of report.results) {
-    lines.push(...formatRequirement(result));
+  for (const requirement of report.requirements) {
+    lines.push(...formatRequirement(requirement));
     lines.push('');
   }
 
-  // Summary
   lines.push(divider);
   lines.push(...formatSummary(report));
   lines.push(divider);
   lines.push('');
-
   return lines.join('\n');
 }
 
-// ─── Requirement Formatting ──────────────────────────────────────────────────
-
-function formatRequirement(result: RequirementResult): string[] {
-  const lines: string[] = [];
-  const { requirement, criteriaResults, overallVerdict, score } = result;
-
-  // Requirement header
-  const icon = verdictIcon(overallVerdict);
-  const title = requirement.title || requirement.id;
-  const scoreText = color(`[${score}]`, c.dim);
-  lines.push(`  ${icon} ${color(requirement.id, c.bold)}: ${title}  ${scoreText}`);
-
-  // Criteria breakdown
-  for (const cr of criteriaResults) {
-    lines.push(...formatCriterion(cr));
-  }
-
-  return lines;
+function formatScope(report: AuditReport): string {
+  return report.scope.kind === 'task'
+    ? `task ${report.scope.taskId}${report.scope.taskTitle ? ` — ${report.scope.taskTitle}` : ''}`
+    : 'full spec';
 }
 
-function formatCriterion(cr: CriterionResult): string[] {
+function formatRequirement(result: RequirementAudit): string[] {
   const lines: string[] = [];
-  const icon = verdictIcon(cr.verdict);
-  const confidencePercent = Math.round(cr.confidence * 100);
-
-  // Truncate long criterion text for readability
-  const text = cr.criterion.text.length > 70
-    ? cr.criterion.text.substring(0, 67) + '...'
-    : cr.criterion.text;
-
-  const confidenceLabel = color(`${confidencePercent}%`, c.gray);
-  lines.push(`      ${icon} ${text}  ${confidenceLabel}`);
-
-  // Evidence line
-  if (cr.evidence.file) {
-    const location = cr.evidence.line > 0
-      ? `${cr.evidence.file}:${cr.evidence.line}`
-      : cr.evidence.file;
-    lines.push(`        ${color('→', c.gray)} ${color(location, c.blue)}`);
-  }
-
-  // Reason (only for non-PASS verdicts to reduce noise)
-  if (cr.verdict !== 'PASS') {
-    lines.push(`        ${color(cr.reason, c.dim)}`);
-  }
-
-  // Remediation suggestion
-  if (cr.suggestion) {
-    lines.push(`        ${color('fix:', c.yellow)} ${color(cr.suggestion, c.dim)}`);
-  }
-
-  return lines;
-}
-
-// ─── Summary Formatting ──────────────────────────────────────────────────────
-
-function formatSummary(report: VerificationReport): string[] {
-  const lines: string[] = [];
-  const { summary } = report;
-
-  // Count criteria totals
-  let totalCriteria = 0;
-  let passedCriteria = 0;
-  for (const result of report.results) {
-    totalCriteria += result.criteriaResults.length;
-    passedCriteria += result.criteriaResults.filter(cr => cr.verdict === 'PASS').length;
-  }
-
-  const percent = totalCriteria > 0
-    ? Math.round((passedCriteria / totalCriteria) * 100)
-    : 0;
-
-  // Progress bar
-  const barWidth = 24;
-  const filled = Math.round((percent / 100) * barWidth);
-  const barColor = percent === 100 ? c.green : percent >= 60 ? c.yellow : c.red;
-  const bar = color('█'.repeat(filled), barColor) + color('░'.repeat(barWidth - filled), c.gray);
-
-  lines.push('');
-  lines.push(`  ${color('RESULT', c.bold)}   ${bar}  ${color(`${percent}%`, c.bold)}`);
-  lines.push('');
-  lines.push(`  ${color('Criteria:', c.dim)}      ${passedCriteria}/${totalCriteria} satisfied`);
+  const title = result.requirement.title || result.requirement.id;
   lines.push(
-    `  ${color('Requirements:', c.dim)}  ` +
-    `${color(`${summary.passed} passed`, c.green)}  ` +
-    `${color(`${summary.partial} partial`, c.yellow)}  ` +
-    `${color(`${summary.failed} failed`, c.red)}`
+    `  ${stateIcon(result.state)} ${color(result.requirement.id, c.bold)}: ${title}  ` +
+    color(`[${result.state}]`, c.dim),
   );
-  lines.push(`  ${color('Status:', c.dim)}        ${verdictSymbol(summary.overallVerdict)}`);
-  lines.push('');
 
+  for (const criterion of result.criteria) {
+    lines.push(...formatCriterion(criterion));
+  }
   return lines;
 }
 
-// ─── Compact Matrix Format ───────────────────────────────────────────────────
+function formatCriterion(criterion: CriterionAudit): string[] {
+  const lines: string[] = [];
+  const text = truncateText(criterion.criterionText, 76);
+  lines.push(`      ${stateIcon(criterion.state)} ${criterion.criterionId}: ${text}`);
+  lines.push(`        ${color('state:', c.dim)} ${stateLabel(criterion.state)}`);
+  lines.push(`        ${color('why:', c.dim)} ${criterion.justification}`);
+
+  if (criterion.evidence.length === 0) {
+    lines.push(`        ${color('evidence:', c.dim)} none recorded`);
+  } else {
+    for (const item of criterion.evidence) {
+      const location = item.location
+        ? `${item.location.file}${item.location.line === undefined ? '' : `:${item.location.line}`}`
+        : 'no location';
+      const support = item.supports ? color('+', c.green) : color('-', c.red);
+      lines.push(
+        `        ${support} ${color(item.source, c.cyan)} ${color(location, c.blue)} — ${item.observation}`,
+      );
+    }
+  }
+
+  for (const gap of criterion.gaps) {
+    lines.push(`        ${color('gap:', c.yellow)} ${gap}`);
+  }
+  if (criterion.repairPreviewAvailable) {
+    lines.push(`        ${color('repair:', c.yellow)} preview available; explicit approval required`);
+  }
+  return lines;
+}
+
+function formatSummary(report: AuditReport): string[] {
+  const { states, totalCriteria, totalRequirements, shipStatus } = report.summary;
+  return [
+    '',
+    `  ${color('SHIP DECISION', c.bold)}  ${shipLabel(shipStatus)}`,
+    '',
+    `  ${color('Requirements:', c.dim)} ${totalRequirements}`,
+    `  ${color('Criteria:', c.dim)}     ${totalCriteria}`,
+    `  ${color('Evidence:', c.dim)}     ` +
+      `${color(`${states.supported} supported`, c.green)}  ` +
+      `${color(`${states.partial} partial`, c.yellow)}  ` +
+      `${color(`${states.unsupported} unsupported`, c.red)}  ` +
+      `${color(`${states.unverified} unverified`, c.blue)}`,
+    '',
+  ];
+}
 
 /**
- * Format a compact coverage matrix (one row per requirement).
- * Useful for CI output or quick scanning.
+ * Render a compact truth map. Each row still carries the criterion state,
+ * justification, evidence, and gaps rather than reducing integrity to a score.
  */
-export function formatMatrixReport(report: VerificationReport): string {
+export function formatMatrixReport(report: AuditReport): string {
   const lines: string[] = [];
-
   lines.push('');
-  lines.push(color(' Requirements Coverage Matrix', c.bold));
-  lines.push(color('─'.repeat(88), c.gray));
-  lines.push(
-    color(
-      ' ID      │ Status  │ Score      │ Evidence                                 ',
-      c.dim
-    )
-  );
-  lines.push(color('─'.repeat(88), c.gray));
+  lines.push(color(' Done Integrity Truth Map', c.bold));
+  lines.push(color('─'.repeat(154), c.gray));
+  lines.push(color(
+    ' Criterion           │ State       │ Justification                    │ Evidence                         │ Gaps',
+    c.dim,
+  ));
+  lines.push(color('─'.repeat(154), c.gray));
 
-  for (const result of report.results) {
-    const id = truncate(result.requirement.id, 7);
-    const status = padVisible(verdictIcon(result.overallVerdict) + ' ' + result.overallVerdict, 7);
-    // Compact the score: "1/2 criteria met" -> "1/2"
-    const compactScore = result.score.replace(/\s*criteria met$/, '');
-    const score = truncate(compactScore, 10);
-
-    // Best evidence: first criterion that has a file reference
-    const firstEvidence = result.criteriaResults.find(cr => cr.evidence.file);
-    const evidence = firstEvidence
-      ? truncate(firstEvidence.evidence.file, 40)
-      : padVisible(color('no evidence found', c.dim), 40);
-
-    lines.push(` ${id} │ ${status} │ ${score} │ ${evidence}`);
+  for (const requirement of report.requirements) {
+    for (const criterion of requirement.criteria) {
+      const id = truncateCell(criterion.criterionId, 19);
+      const state = padVisible(stateLabel(criterion.state), 11);
+      const justification = truncateCell(criterion.justification, 32);
+      const evidence = truncateCell(formatEvidenceSummary(criterion), 32);
+      const gaps = truncateCell(criterion.gaps.join('; ') || 'none', 32);
+      lines.push(` ${id} │ ${state} │ ${justification} │ ${evidence} │ ${gaps}`);
+    }
   }
 
-  lines.push(color('─'.repeat(88), c.gray));
+  lines.push(color('─'.repeat(154), c.gray));
+  lines.push(` Ship decision: ${shipLabel(report.summary.shipStatus)}`);
   lines.push('');
-
   return lines.join('\n');
 }
 
-// ─── Utilities ───────────────────────────────────────────────────────────────
-
-/** Pad a string accounting for ANSI escape sequences */
-function padVisible(text: string, width: number): string {
-  const visibleLength = text.replace(/\x1b\[[0-9;]*m/g, '').length;
-  const padding = Math.max(0, width - visibleLength);
-  return text + ' '.repeat(padding);
+function formatEvidenceSummary(criterion: CriterionAudit): string {
+  if (criterion.evidence.length === 0) return 'none recorded';
+  const item = criterion.evidence[0];
+  if (!item.location) return `${item.source}: ${item.observation}`;
+  const line = item.location.line === undefined ? '' : `:${item.location.line}`;
+  return `${item.source}: ${item.location.file}${line}`;
 }
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? text.substring(0, max - 3) + '...' : text.padEnd(max);
+function padVisible(text: string, width: number): string {
+  const visibleLength = text.replace(/\x1b\[[0-9;]*m/g, '').length;
+  return text + ' '.repeat(Math.max(0, width - visibleLength));
+}
+
+function truncateText(text: string, max: number): string {
+  return text.length > max ? `${text.substring(0, max - 3)}...` : text;
+}
+
+function truncateCell(text: string, width: number): string {
+  return truncateText(text, width).padEnd(width);
 }

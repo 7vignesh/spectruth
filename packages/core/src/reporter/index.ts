@@ -1,10 +1,8 @@
 /**
- * Reporter
- *
- * Formats verification reports in multiple output formats.
+ * Done Integrity report format dispatch.
  */
 
-import type { VerificationReport } from '../types.js';
+import type { AuditReport } from '../types.js';
 import { formatTerminalReport, formatMatrixReport } from './terminal.js';
 import { formatJSONReport, formatMatrixJSON, formatGitHubAnnotations } from './json.js';
 
@@ -18,22 +16,15 @@ export {
 
 export type OutputFormat = 'terminal' | 'json' | 'matrix' | 'github';
 
-/**
- * Generate a report in the requested format.
- */
 export function generateReport(
-  report: VerificationReport,
-  format: OutputFormat = 'terminal'
+  report: AuditReport,
+  format: OutputFormat = 'terminal',
 ): string {
   switch (format) {
-    case 'json':
-      return formatJSONReport(report);
-    case 'matrix':
-      return formatMatrixReport(report);
-    case 'github':
-      return formatGitHubAnnotations(report);
+    case 'json': return formatJSONReport(report);
+    case 'matrix': return formatMatrixReport(report);
+    case 'github': return formatGitHubAnnotations(report);
     case 'terminal':
-    default:
-      return formatTerminalReport(report);
+    default: return formatTerminalReport(report);
   }
 }

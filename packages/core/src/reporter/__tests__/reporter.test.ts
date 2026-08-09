@@ -1,239 +1,204 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  formatTerminalReport,
-  formatMatrixReport,
+  formatGitHubAnnotations,
   formatJSONReport,
   formatMatrixJSON,
-  formatGitHubAnnotations,
+  formatMatrixReport,
+  formatTerminalReport,
   generateReport,
 } from '../index.js';
-import type { VerificationReport } from '../../types.js';
+import type { SpecAuditReport } from '../../types.js';
 
-// ─── Test Fixture ────────────────────────────────────────────────────────────
-
-const SAMPLE_REPORT: VerificationReport = {
+const SAMPLE_REPORT: SpecAuditReport = {
+  scope: { kind: 'spec' },
   specTitle: 'User Authentication',
   timestamp: '2026-08-09T14:30:00.000Z',
   codebasePath: '/project/src',
-  results: [
+  requirements: [
     {
       requirement: {
         id: 'REQ-1',
         title: 'create an account',
-        userStory: 'As a new user, I want to create an account, so that I can log in.',
-        acceptanceCriteria: [
-          { id: 'REQ-1-AC-1', text: 'WHEN valid email THEN create account', keyword: 'WHEN/THEN' },
-          { id: 'REQ-1-AC-2', text: 'WHEN duplicate email THEN return 409', keyword: 'WHEN/THEN' },
-        ],
+        userStory: 'As a new user, I want to create an account.',
+        acceptanceCriteria: [],
       },
-      criteriaResults: [
+      state: 'SUPPORTED',
+      criteria: [
         {
-          criterion: { id: 'REQ-1-AC-1', text: 'WHEN valid email THEN create account', keyword: 'WHEN/THEN' },
-          verdict: 'PASS',
-          confidence: 0.95,
-          reason: 'Registration endpoint creates users',
-          evidence: { file: 'src/routes/auth.ts', line: 12, detail: 'db.users.create' },
+          criterionId: 'REQ-1-AC-1',
+          criterionText: 'WHEN valid email THEN create account',
+          state: 'SUPPORTED',
+          justification: 'The registration endpoint creates a user record.',
+          evidence: [{
+            source: 'source-code',
+            location: { file: 'src/routes/auth.ts', line: 12 },
+            observation: 'db.users.create persists the account',
+            supports: true,
+          }],
+          gaps: [],
+          repairPreviewAvailable: false,
         },
         {
-          criterion: { id: 'REQ-1-AC-2', text: 'WHEN duplicate email THEN return 409', keyword: 'WHEN/THEN' },
-          verdict: 'PASS',
-          confidence: 0.9,
-          reason: 'Duplicate check returns 409',
-          evidence: { file: 'src/routes/auth.ts', line: 19, detail: 'res.status(409)' },
+          criterionId: 'REQ-1-AC-2',
+          criterionText: 'WHEN duplicate email THEN return 409',
+          state: 'SUPPORTED',
+          justification: 'The duplicate branch returns HTTP 409.',
+          evidence: [{
+            source: 'static-check',
+            location: { file: 'src/routes/auth.ts', line: 19 },
+            observation: 'Status code 409 is present in the duplicate branch',
+            supports: true,
+          }],
+          gaps: [],
+          repairPreviewAvailable: false,
         },
       ],
-      overallVerdict: 'PASS',
-      score: '2/2 criteria met',
     },
     {
       requirement: {
         id: 'REQ-2',
         title: 'rate limiting on login',
-        userStory: 'As an operator, I want rate limiting, so that brute force is blocked.',
-        acceptanceCriteria: [
-          { id: 'REQ-2-AC-1', text: 'WHEN repeated failed logins THEN throttle requests', keyword: 'WHEN/THEN' },
-        ],
+        userStory: 'As an operator, I want brute-force protection.',
+        acceptanceCriteria: [],
       },
-      criteriaResults: [
-        {
-          criterion: { id: 'REQ-2-AC-1', text: 'WHEN repeated failed logins THEN throttle requests', keyword: 'WHEN/THEN' },
-          verdict: 'FAIL',
-          confidence: 0.85,
-          reason: 'No rate limiting middleware found',
-          evidence: { file: '', line: 0, detail: 'No matching code found' },
-          suggestion: 'Add express-rate-limit middleware to the login route',
-        },
-      ],
-      overallVerdict: 'FAIL',
-      score: '0/1 criteria met',
+      state: 'UNSUPPORTED',
+      criteria: [{
+        criterionId: 'REQ-2-AC-1',
+        criterionText: 'WHEN repeated failed logins THEN throttle requests',
+        state: 'UNSUPPORTED',
+        justification: 'No rate-limiting middleware or equivalent guard was found.',
+        evidence: [],
+        gaps: ['Login throttling implementation is absent.'],
+        repairPreviewAvailable: true,
+      }],
     },
   ],
   summary: {
     totalRequirements: 2,
-    passed: 1,
-    failed: 1,
-    partial: 0,
-    overallScore: '2/3 criteria satisfied',
-    overallVerdict: 'PARTIAL',
+    totalCriteria: 3,
+    states: { supported: 2, partial: 0, unsupported: 1, unverified: 0 },
+    shipStatus: 'BLOCKED',
   },
 };
 
-/** Strip ANSI codes so assertions are stable regardless of TTY */
 function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-// ─── Terminal Report Tests ───────────────────────────────────────────────────
+function expectNoScoringLanguage(output: string): void {
+  expect(output.toLowerCase()).not.toContain('confidence');
+  expect(output.toLowerCase()).not.toContain('overallscore');
+  expect(output.toLowerCase()).not.toContain('completion score');
+  expect(output).not.toMatch(/\b\d+(?:\.\d+)?%\b/);
+  expect(output).not.toMatch(/\b\d+\/\d+\s+(?:criteria|requirements)\b/i);
+}
 
 describe('formatTerminalReport', () => {
   const output = stripAnsi(formatTerminalReport(SAMPLE_REPORT));
 
-  it('includes the spec title', () => {
+  it('includes audit metadata and scope', () => {
+    expect(output).toContain('Done Integrity Audit');
     expect(output).toContain('User Authentication');
-  });
-
-  it('includes the codebase path', () => {
     expect(output).toContain('/project/src');
+    expect(output).toContain('full spec');
   });
 
-  it('lists every requirement id', () => {
-    expect(output).toContain('REQ-1');
-    expect(output).toContain('REQ-2');
+  it('renders every evidence state finding and its justification', () => {
+    expect(output).toContain('REQ-1-AC-1');
+    expect(output).toContain('SUPPORTED');
+    expect(output).toContain('REQ-2-AC-1');
+    expect(output).toContain('UNSUPPORTED');
+    expect(output).toContain('registration endpoint creates a user');
+    expect(output).toContain('No rate-limiting middleware');
   });
 
-  it('shows per-requirement scores', () => {
-    expect(output).toContain('2/2 criteria met');
-    expect(output).toContain('0/1 criteria met');
-  });
-
-  it('shows evidence file and line for passing criteria', () => {
+  it('renders evidence, gaps, and approval-gated repair availability', () => {
     expect(output).toContain('src/routes/auth.ts:12');
+    expect(output).toContain('db.users.create');
+    expect(output).toContain('Login throttling implementation is absent');
+    expect(output).toContain('explicit approval required');
   });
 
-  it('shows the failure reason for failing criteria', () => {
-    expect(output).toContain('No rate limiting middleware found');
+  it('renders state counts and ship status', () => {
+    expect(output).toContain('2 supported');
+    expect(output).toContain('1 unsupported');
+    expect(output).toContain('SHIP DECISION');
+    expect(output).toContain('BLOCKED');
   });
 
-  it('shows the remediation suggestion for failures', () => {
-    expect(output).toContain('express-rate-limit');
-  });
-
-  it('shows summary counts', () => {
-    expect(output).toContain('1 passed');
-    expect(output).toContain('1 failed');
-  });
-
-  it('shows the overall percentage', () => {
-    // 2 of 3 criteria = 67%
-    expect(output).toContain('67%');
-  });
-
-  it('does not print the reason line for passing criteria', () => {
-    expect(output).not.toContain('Registration endpoint creates users');
+  it('contains no confidence percentage or arbitrary completion score', () => {
+    expectNoScoringLanguage(output);
   });
 });
-
-// ─── Matrix Report Tests ─────────────────────────────────────────────────────
 
 describe('formatMatrixReport', () => {
   const output = stripAnsi(formatMatrixReport(SAMPLE_REPORT));
 
-  it('renders a header row', () => {
-    expect(output).toContain('Requirements Coverage Matrix');
-    expect(output).toContain('Status');
+  it('renders one truth-map row per criterion', () => {
+    expect(output).toContain('Done Integrity Truth Map');
+    expect(output).toContain('REQ-1-AC-1');
+    expect(output).toContain('REQ-1-AC-2');
+    expect(output).toContain('REQ-2-AC-1');
+  });
+
+  it('includes state, justification, evidence, gaps, and ship decision', () => {
+    expect(output).toContain('State');
+    expect(output).toContain('Justification');
     expect(output).toContain('Evidence');
+    expect(output).toContain('Gaps');
+    expect(output).toContain('BLOCKED');
   });
 
-  it('renders one row per requirement', () => {
-    expect(output).toContain('REQ-1');
-    expect(output).toContain('REQ-2');
-  });
-
-  it('shows verdicts', () => {
-    expect(output).toContain('PASS');
-    expect(output).toContain('FAIL');
+  it('contains no confidence percentage or arbitrary completion score', () => {
+    expectNoScoringLanguage(output);
   });
 });
 
-// ─── JSON Report Tests ───────────────────────────────────────────────────────
-
-describe('formatJSONReport', () => {
-  it('produces valid parseable JSON', () => {
-    const json = formatJSONReport(SAMPLE_REPORT);
-    expect(() => JSON.parse(json)).not.toThrow();
-  });
-
-  it('round-trips the report structure', () => {
+describe('JSON reporters', () => {
+  it('round-trips the complete audit report', () => {
     const parsed = JSON.parse(formatJSONReport(SAMPLE_REPORT));
-    expect(parsed.specTitle).toBe('User Authentication');
-    expect(parsed.results).toHaveLength(2);
-    expect(parsed.summary.overallVerdict).toBe('PARTIAL');
+    expect(parsed).toEqual(SAMPLE_REPORT);
+    expect(parsed.summary.shipStatus).toBe('BLOCKED');
+  });
+
+  it('flattens criteria without dropping integrity evidence', () => {
+    const parsed = JSON.parse(formatMatrixJSON(SAMPLE_REPORT));
+    expect(parsed.truthMap).toHaveLength(3);
+    const unsupported = parsed.truthMap.find(
+      (row: { state: string }) => row.state === 'UNSUPPORTED',
+    );
+    expect(unsupported.justification).toContain('rate-limiting');
+    expect(unsupported.gaps).toEqual(['Login throttling implementation is absent.']);
+    expect(unsupported.repairPreviewAvailable).toBe(true);
+  });
+
+  it('contains no confidence percentage or arbitrary completion score', () => {
+    expectNoScoringLanguage(formatJSONReport(SAMPLE_REPORT));
+    expectNoScoringLanguage(formatMatrixJSON(SAMPLE_REPORT));
   });
 });
-
-describe('formatMatrixJSON', () => {
-  const parsed = JSON.parse(formatMatrixJSON(SAMPLE_REPORT));
-
-  it('flattens criteria into matrix rows', () => {
-    expect(parsed.matrix).toHaveLength(3); // 2 + 1 criteria
-  });
-
-  it('includes requirement and criterion identifiers on each row', () => {
-    expect(parsed.matrix[0].requirementId).toBe('REQ-1');
-    expect(parsed.matrix[0].criterionId).toBe('REQ-1-AC-1');
-  });
-
-  it('nulls out missing evidence fields', () => {
-    const failRow = parsed.matrix.find((r: { status: string }) => r.status === 'FAIL');
-    expect(failRow.evidenceFile).toBeNull();
-  });
-
-  it('carries the remediation action', () => {
-    const failRow = parsed.matrix.find((r: { status: string }) => r.status === 'FAIL');
-    expect(failRow.action).toContain('express-rate-limit');
-  });
-});
-
-// ─── GitHub Annotations Tests ────────────────────────────────────────────────
 
 describe('formatGitHubAnnotations', () => {
   const output = formatGitHubAnnotations(SAMPLE_REPORT);
 
-  it('emits an error annotation for failures', () => {
+  it('emits errors for blocking findings but not supported findings', () => {
     expect(output).toContain('::error');
-    expect(output).toContain('REQ-2');
-  });
-
-  it('does not emit annotations for passing criteria', () => {
+    expect(output).toContain('REQ-2-AC-1');
     expect(output).not.toContain('REQ-1-AC-1');
   });
 
-  it('emits a notice with the summary', () => {
+  it('emits the ship decision and state counts', () => {
     expect(output).toContain('::notice');
-    expect(output).toContain('2/3 criteria satisfied');
+    expect(output).toContain('BLOCKED');
+    expect(output).toContain('2 supported');
   });
 });
 
-// ─── Format Dispatch Tests ───────────────────────────────────────────────────
-
 describe('generateReport', () => {
-  it('defaults to terminal format', () => {
-    const output = stripAnsi(generateReport(SAMPLE_REPORT));
-    expect(output).toContain('SpecTruth');
-  });
-
-  it('dispatches to json', () => {
-    const output = generateReport(SAMPLE_REPORT, 'json');
-    expect(() => JSON.parse(output)).not.toThrow();
-  });
-
-  it('dispatches to matrix', () => {
-    const output = stripAnsi(generateReport(SAMPLE_REPORT, 'matrix'));
-    expect(output).toContain('Coverage Matrix');
-  });
-
-  it('dispatches to github', () => {
-    const output = generateReport(SAMPLE_REPORT, 'github');
-    expect(output).toContain('::error');
+  it('defaults to terminal and dispatches each requested format', () => {
+    expect(stripAnsi(generateReport(SAMPLE_REPORT))).toContain('SpecTruth');
+    expect(() => JSON.parse(generateReport(SAMPLE_REPORT, 'json'))).not.toThrow();
+    expect(stripAnsi(generateReport(SAMPLE_REPORT, 'matrix'))).toContain('Truth Map');
+    expect(generateReport(SAMPLE_REPORT, 'github')).toContain('::error');
   });
 });

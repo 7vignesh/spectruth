@@ -1,7 +1,8 @@
 /**
  * SpecTruth Core Types
  *
- * All shared interfaces for the spec conformance verification engine.
+ * Shared interfaces for parsing Kiro specs and producing evidence-backed
+ * Done Integrity audit reports.
  */
 
 // ─── Parsed Spec Types ───────────────────────────────────────────────────────
@@ -43,46 +44,100 @@ export interface RetrievalResult {
   searchTerms: string[];
 }
 
-// ─── Verification Types ──────────────────────────────────────────────────────
+// ─── Done Integrity Domain Types ─────────────────────────────────────────────
 
-export type Verdict = 'PASS' | 'FAIL' | 'PARTIAL';
+export type EvidenceState =
+  | 'SUPPORTED'
+  | 'PARTIAL'
+  | 'UNSUPPORTED'
+  | 'UNVERIFIED';
 
-export interface Evidence {
+export type ShipStatus =
+  | 'READY'
+  | 'REVIEW_REQUIRED'
+  | 'BLOCKED';
+
+export type EvidenceSource =
+  | 'requirement'
+  | 'design'
+  | 'task'
+  | 'task-transition'
+  | 'git-diff'
+  | 'source-code'
+  | 'static-check'
+  | 'test-output';
+
+export interface EvidenceLocation {
   file: string;
-  line: number;
-  detail: string;
+  line?: number;
 }
 
-export interface CriterionResult {
-  criterion: AcceptanceCriterion;
-  verdict: Verdict;
-  confidence: number;
-  reason: string;
-  evidence: Evidence;
-  suggestion?: string;
+export interface EvidenceItem {
+  source: EvidenceSource;
+  location?: EvidenceLocation;
+  observation: string;
+  supports: boolean;
 }
 
-export interface RequirementResult {
+export interface CriterionAudit {
+  criterionId: string;
+  criterionText: string;
+  state: EvidenceState;
+  justification: string;
+  evidence: EvidenceItem[];
+  gaps: string[];
+  repairPreviewAvailable: boolean;
+}
+
+export interface RequirementAudit {
   requirement: Requirement;
-  criteriaResults: CriterionResult[];
-  overallVerdict: Verdict;
-  score: string;
+  state: EvidenceState;
+  criteria: CriterionAudit[];
 }
 
-export interface VerificationReport {
+export interface EvidenceStateCounts {
+  supported: number;
+  partial: number;
+  unsupported: number;
+  unverified: number;
+}
+
+export interface AuditSummary {
+  totalRequirements: number;
+  totalCriteria: number;
+  states: EvidenceStateCounts;
+  shipStatus: ShipStatus;
+}
+
+export interface SpecAuditScope {
+  kind: 'spec';
+}
+
+export interface TaskAuditScope {
+  kind: 'task';
+  taskId: string;
+  taskTitle?: string;
+}
+
+export interface SpecAuditReport {
+  scope: SpecAuditScope;
   specTitle: string;
   timestamp: string;
   codebasePath: string;
-  results: RequirementResult[];
-  summary: {
-    totalRequirements: number;
-    passed: number;
-    failed: number;
-    partial: number;
-    overallScore: string;
-    overallVerdict: Verdict;
-  };
+  requirements: RequirementAudit[];
+  summary: AuditSummary;
 }
+
+export interface TaskAuditReport {
+  scope: TaskAuditScope;
+  specTitle: string;
+  timestamp: string;
+  codebasePath: string;
+  requirements: RequirementAudit[];
+  summary: AuditSummary;
+}
+
+export type AuditReport = SpecAuditReport | TaskAuditReport;
 
 // ─── LLM Provider Types ──────────────────────────────────────────────────────
 

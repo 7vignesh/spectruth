@@ -1,39 +1,46 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { join } from 'path';
 import {
-  verify,
-  loadSpec,
-  validateCodePath,
   buildReport,
+  loadSpec,
   reportToExitCode,
   SpecTruthError,
+  validateCodePath,
+  verify,
 } from '../verify.js';
-import type { LLMProvider, ParsedSpec, RequirementResult, VerificationReport } from '../types.js';
+import { createCriterionAudit } from '../domain/audit.js';
+import type {
+  EvidenceState,
+  LLMProvider,
+  ParsedSpec,
+  RequirementAudit,
+  ShipStatus,
+  SpecAuditReport,
+} from '../types.js';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
 const SPEC_PATH = join(FIXTURES, 'sample-spec.md');
 const NO_REQ_SPEC_PATH = join(FIXTURES, 'no-requirements.md');
 const CODE_PATH = join(FIXTURES, 'sample-code');
 
-// ─── Mock Provider ───────────────────────────────────────────────────────────
-
-/** Returns a fixed verdict for every criterion. */
-function mockProvider(verdict: 'PASS' | 'FAIL' | 'PARTIAL'): LLMProvider {
+function mockProvider(state: EvidenceState): LLMProvider {
   return {
     name: 'mock',
     async verify(): Promise<string> {
       return JSON.stringify({
-        verdict,
-        confidence: 0.9,
-        reason: `Mock verdict: ${verdict}`,
-        evidence: { file: 'register.js', line: 5, detail: 'mock evidence' },
-        suggestion: verdict === 'PASS' ? null : 'Mock remediation task',
+        state,
+        justification: `Mock evidence supports state ${state}`,
+        evidence: [{
+          source: 'source-code',
+          location: { file: 'register.js', line: 5 },
+          observation: 'Mock source observation',
+          supports: state === 'SUPPORTED',
+        }],
+        gaps: state === 'SUPPORTED' ? [] : ['Mock evidence gap'],
       });
     },
   };
 }
-
-// ─── loadSpec ────────────────────────────────────────────────────────────────
 
 describe('loadSpec', () => {
   it('parses a valid spec file', () => {
@@ -54,22 +61,16 @@ describe('loadSpec', () => {
     }
   });
 
-  it('throws SPEC_NO_REQUIREMENTS when the spec has no requirements', () => {
-    try {
-      loadSpec(NO_REQ_SPEC_PATH);
-      expect.unreachable('should have thrown');
-    } catch (error) {
-      expect((error as SpecTruthError).code).toBe('SPEC_NO_REQUIREMENTS');
-    }
+  it('throws SPEC_NO_REQUIREMENTS for a spec without requirements', () => {
+    expect(() => loadSpec(NO_REQ_SPEC_PATH)).toThrowError(
+      expect.objectContaining({ code: 'SPEC_NO_REQUIREMENTS' }),
+    );
   });
 });
 
-// ─── validateCodePath ────────────────────────────────────────────────────────
-
 describe('validateCodePath', () => {
   it('returns an absolute path for a valid directory', () => {
-    const resolved = validateCodePath(CODE_PATH);
-    expect(resolved).toContain('sample-code');
+    expect(validateCodePath(CODE_PATH)).toContain('sample-code');
   });
 
   it('throws CODE_PATH_NOT_FOUND for a missing directory', () => {
@@ -81,7 +82,7 @@ describe('validateCodePath', () => {
     }
   });
 
-  it('throws CODE_PATH_NOT_DIRECTORY when given a file', () => {
+  it('throws CODE_PATH_NOT_DIRECTORY for a file', () => {
     try {
       validateCodePath(SPEC_PATH);
       expect.unreachable('should have thrown');
@@ -91,60 +92,55 @@ describe('validateCodePath', () => {
   });
 });
 
-// ─── verify (end-to-end with mock LLM) ───────────────────────────────────────
-
 describe('verify', () => {
-  it('produces a full report when everything passes', async () => {
+  it('produces READY only when all criteria are supported', async () => {
     const report = await verify({
       specPath: SPEC_PATH,
       codePath: CODE_PATH,
-      llmProvider: mockProvider('PASS'),
+      llmProvider: mockProvider('SUPPORTED'),
     });
-
+    expect(report.scope).toEqual({ kind: 'spec' });
     expect(report.specTitle).toBe('Sample Feature');
-    expect(report.results).toHaveLength(1);
+    expect(report.requirements).toHaveLength(1);
     expect(report.summary.totalRequirements).toBe(1);
-    expect(report.summary.passed).toBe(1);
-    expect(report.summary.failed).toBe(0);
-    expect(report.summary.overallVerdict).toBe('PASS');
-    expect(report.summary.overallScore).toBe('2/2 criteria satisfied');
+    expect(report.summary.totalCriteria).toBe(2);
+    expect(report.summary.states.supported).toBe(2);
+    expect(report.summary.shipStatus).toBe('READY');
   });
 
-  it('marks the requirement FAIL when all criteria fail', async () => {
+  it.each([
+    ['PARTIAL', 'BLOCKED'],
+    ['UNSUPPORTED', 'BLOCKED'],
+    ['UNVERIFIED', 'REVIEW_REQUIRED'],
+  ] as const)('maps %s findings to %s', async (state, shipStatus) => {
     const report = await verify({
       specPath: SPEC_PATH,
       codePath: CODE_PATH,
-      llmProvider: mockProvider('FAIL'),
+      llmProvider: mockProvider(state),
     });
-
-    expect(report.summary.failed).toBe(1);
-    expect(report.summary.overallVerdict).toBe('FAIL');
-    expect(report.summary.overallScore).toBe('0/2 criteria satisfied');
+    expect(report.summary.shipStatus).toBe(shipStatus);
+    expect(report.requirements[0].criteria.every(item => item.state === state)).toBe(true);
   });
 
-  it('carries remediation suggestions through to the report', async () => {
+  it('carries evidence gaps into the report', async () => {
     const report = await verify({
       specPath: SPEC_PATH,
       codePath: CODE_PATH,
-      llmProvider: mockProvider('FAIL'),
+      llmProvider: mockProvider('PARTIAL'),
     });
-
-    const suggestions = report.results[0].criteriaResults.map(cr => cr.suggestion);
-    expect(suggestions.every(s => s === 'Mock remediation task')).toBe(true);
+    expect(report.requirements[0].criteria.every(item =>
+      item.gaps.includes('Mock evidence gap'),
+    )).toBe(true);
   });
 
   it('invokes onProgress once per requirement', async () => {
     const seen: string[] = [];
-
     await verify({
       specPath: SPEC_PATH,
       codePath: CODE_PATH,
-      llmProvider: mockProvider('PASS'),
-      onProgress: (result: RequirementResult) => {
-        seen.push(result.requirement.id);
-      },
+      llmProvider: mockProvider('SUPPORTED'),
+      onProgress: (result: RequirementAudit) => seen.push(result.requirement.id),
     });
-
     expect(seen).toEqual(['REQ-1']);
   });
 
@@ -152,116 +148,90 @@ describe('verify', () => {
     const report = await verify({
       specPath: SPEC_PATH,
       codePath: CODE_PATH,
-      llmProvider: mockProvider('PASS'),
+      llmProvider: mockProvider('SUPPORTED'),
     });
-
-    expect(() => new Date(report.timestamp).toISOString()).not.toThrow();
+    expect(new Date(report.timestamp).toISOString()).toBe(report.timestamp);
   });
 
   it('propagates spec errors before touching the LLM', async () => {
-    await expect(
-      verify({
-        specPath: join(FIXTURES, 'missing.md'),
-        codePath: CODE_PATH,
-        llmProvider: mockProvider('PASS'),
-      })
-    ).rejects.toThrow(SpecTruthError);
+    await expect(verify({
+      specPath: join(FIXTURES, 'missing.md'),
+      codePath: CODE_PATH,
+      llmProvider: mockProvider('SUPPORTED'),
+    })).rejects.toThrow(SpecTruthError);
   });
 });
 
-// ─── buildReport ─────────────────────────────────────────────────────────────
-
 describe('buildReport', () => {
-  const spec: ParsedSpec = {
-    title: 'Aggregation Spec',
-    introduction: '',
-    requirements: [],
-  };
+  const spec: ParsedSpec = { title: 'Aggregation Spec', introduction: '', requirements: [] };
 
-  function makeResult(verdict: 'PASS' | 'FAIL' | 'PARTIAL', id: string): RequirementResult {
-    const criterion = { id: `${id}-AC-1`, text: 'something', keyword: 'plain' as const };
+  function makeResult(state: EvidenceState, id: string): RequirementAudit {
+    const criterion = createCriterionAudit({
+      criterionId: `${id}-AC-1`,
+      criterionText: 'The behavior is implemented',
+      state,
+      justification: `Evidence adjudicated as ${state}`,
+      evidence: [],
+      gaps: [],
+      repairPreviewAvailable: false,
+    });
     return {
-      requirement: { id, title: id, userStory: '', acceptanceCriteria: [criterion] },
-      criteriaResults: [
-        {
-          criterion,
-          verdict,
-          confidence: 0.9,
-          reason: 'x',
-          evidence: { file: 'a.ts', line: 1, detail: 'x' },
-        },
-      ],
-      overallVerdict: verdict,
-      score: verdict === 'PASS' ? '1/1 criteria met' : '0/1 criteria met',
+      requirement: {
+        id,
+        title: id,
+        userStory: '',
+        acceptanceCriteria: [],
+      },
+      state,
+      criteria: [criterion],
     };
   }
 
-  it('reports PASS only when every requirement passes', () => {
-    const report = buildReport(spec, '/code', [makeResult('PASS', 'REQ-1'), makeResult('PASS', 'REQ-2')]);
-    expect(report.summary.overallVerdict).toBe('PASS');
-  });
-
-  it('reports FAIL when nothing passes and nothing is partial', () => {
-    const report = buildReport(spec, '/code', [makeResult('FAIL', 'REQ-1'), makeResult('FAIL', 'REQ-2')]);
-    expect(report.summary.overallVerdict).toBe('FAIL');
-  });
-
-  it('reports PARTIAL for a mix of pass and fail', () => {
-    const report = buildReport(spec, '/code', [makeResult('PASS', 'REQ-1'), makeResult('FAIL', 'REQ-2')]);
-    expect(report.summary.overallVerdict).toBe('PARTIAL');
-  });
-
-  it('reports PARTIAL when any requirement is partial', () => {
-    const report = buildReport(spec, '/code', [makeResult('PARTIAL', 'REQ-1')]);
-    expect(report.summary.overallVerdict).toBe('PARTIAL');
-  });
-
-  it('counts criteria across all requirements', () => {
+  it('aggregates all four evidence-state counts', () => {
     const report = buildReport(spec, '/code', [
-      makeResult('PASS', 'REQ-1'),
-      makeResult('FAIL', 'REQ-2'),
-      makeResult('PASS', 'REQ-3'),
+      makeResult('SUPPORTED', 'REQ-1'),
+      makeResult('PARTIAL', 'REQ-2'),
+      makeResult('UNSUPPORTED', 'REQ-3'),
+      makeResult('UNVERIFIED', 'REQ-4'),
     ]);
-    expect(report.summary.overallScore).toBe('2/3 criteria satisfied');
+    expect(report.summary.states).toEqual({
+      supported: 1,
+      partial: 1,
+      unsupported: 1,
+      unverified: 1,
+    });
+    expect(report.summary.totalCriteria).toBe(4);
+    expect(report.summary.shipStatus).toBe('BLOCKED');
   });
 
-  it('handles an empty result set', () => {
+  it('does not treat an empty result set as READY', () => {
     const report = buildReport(spec, '/code', []);
     expect(report.summary.totalRequirements).toBe(0);
-    expect(report.summary.overallScore).toBe('0/0 criteria satisfied');
-    expect(report.summary.overallVerdict).toBe('PASS');
+    expect(report.summary.totalCriteria).toBe(0);
+    expect(report.summary.shipStatus).toBe('REVIEW_REQUIRED');
   });
 });
 
-// ─── reportToExitCode ────────────────────────────────────────────────────────
-
 describe('reportToExitCode', () => {
-  function reportWithVerdict(verdict: 'PASS' | 'FAIL' | 'PARTIAL'): VerificationReport {
+  function reportWithStatus(shipStatus: ShipStatus): SpecAuditReport {
     return {
+      scope: { kind: 'spec' },
       specTitle: 'x',
       timestamp: new Date().toISOString(),
       codebasePath: '/code',
-      results: [],
+      requirements: [],
       summary: {
-        totalRequirements: 1,
-        passed: verdict === 'PASS' ? 1 : 0,
-        failed: verdict === 'FAIL' ? 1 : 0,
-        partial: verdict === 'PARTIAL' ? 1 : 0,
-        overallScore: '0/1 criteria satisfied',
-        overallVerdict: verdict,
+        totalRequirements: 0,
+        totalCriteria: 0,
+        states: { supported: 0, partial: 0, unsupported: 0, unverified: 0 },
+        shipStatus,
       },
     };
   }
 
-  it('returns 0 on PASS', () => {
-    expect(reportToExitCode(reportWithVerdict('PASS'))).toBe(0);
-  });
-
-  it('returns 1 on FAIL', () => {
-    expect(reportToExitCode(reportWithVerdict('FAIL'))).toBe(1);
-  });
-
-  it('returns 1 on PARTIAL', () => {
-    expect(reportToExitCode(reportWithVerdict('PARTIAL'))).toBe(1);
+  it('returns zero only for READY', () => {
+    expect(reportToExitCode(reportWithStatus('READY'))).toBe(0);
+    expect(reportToExitCode(reportWithStatus('BLOCKED'))).toBe(1);
+    expect(reportToExitCode(reportWithStatus('REVIEW_REQUIRED'))).toBe(1);
   });
 });
