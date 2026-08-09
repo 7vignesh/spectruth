@@ -8,7 +8,9 @@
 
 export * from './types.js';
 export { parseSpec } from './parser/index.js';
-// export { findRelevantCode } from './retriever/index.js';  // Coming Day 2
-// export { verifyCriterion } from './verifier/index.js';    // Coming Day 2
+export { findRelevantCode, extractKeywords, walkFileTree } from './retriever/index.js';
+export { verifyRequirement, verifyCriterion, buildVerificationPrompt, parseLLMResponse } from './verifier/index.js';
+export { createProvider, isKiroSession, AnthropicProvider, OpenAIProvider, KiroProvider } from './verifier/provider.js';
+export { runStaticChecks } from './verifier/static-checks.js';
 // export { generateReport } from './reporter/index.js';     // Coming Day 3
 // export { verify } from './verify.js';                     // Coming Day 3
