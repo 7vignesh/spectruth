@@ -18,26 +18,10 @@ import { parseSpec } from './parser/index.js';
 import { verifyRequirement } from './verifier/index.js';
 import { createProvider } from './verifier/provider.js';
 
-export class SpecTruthError extends Error {
-  constructor(
-    message: string,
-    public readonly code: SpecTruthErrorCode,
-    public readonly hint?: string,
-  ) {
-    super(message);
-    this.name = 'SpecTruthError';
-  }
-}
+export { SpecTruthError } from './errors.js';
+export type { SpecTruthErrorCode } from './errors.js';
 
-export type SpecTruthErrorCode =
-  | 'SPEC_NOT_FOUND'
-  | 'SPEC_UNREADABLE'
-  | 'SPEC_EMPTY'
-  | 'SPEC_NO_REQUIREMENTS'
-  | 'CODE_PATH_NOT_FOUND'
-  | 'CODE_PATH_NOT_DIRECTORY'
-  | 'NO_PROVIDER'
-  | 'VERIFICATION_FAILED';
+import { SpecTruthError } from './errors.js';
 
 export interface VerifyOptions {
   specPath: string;

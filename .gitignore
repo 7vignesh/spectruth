@@ -7,3 +7,6 @@ dist/
 out/
 coverage/
 .turbo/
+
+# Local SpecTruth audit state (pre-task snapshots, persisted reports)
+.spectruth/

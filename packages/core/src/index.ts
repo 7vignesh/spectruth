@@ -4,6 +4,9 @@
 
 export * from './types.js';
 
+export { SpecTruthError } from './errors.js';
+export type { SpecTruthErrorCode } from './errors.js';
+
 export { createCriterionAudit, EVIDENCE_STATES } from './domain/audit.js';
 export type { CreateCriterionAuditInput } from './domain/audit.js';
 export {
@@ -16,6 +19,36 @@ export {
 } from './domain/policy.js';
 
 export { parseSpec } from './parser/index.js';
+export { parseTasks, parseRequirementRefs } from './parser/tasks.js';
+export { parseDesign } from './parser/design.js';
+export { resolveTaskLinks } from './parser/links.js';
+export type { ResolveLinksInput, ResolveLinksResult } from './parser/links.js';
+export { loadKiroSpec } from './parser/kiro-spec.js';
+export type { LoadKiroSpecOptions } from './parser/kiro-spec.js';
+
+export {
+  captureSnapshot,
+  captureFingerprints,
+  captureGitState,
+  captureTaskStates,
+  captureSpecSnapshot,
+  diffChangedFiles,
+  inferCompletedTask,
+  inferCompletedTaskForSpec,
+  normalizePath,
+  parseDirtyFiles,
+  readSnapshot,
+  snapshotExists,
+  snapshotPathFor,
+  writeSnapshot,
+  SNAPSHOT_DIR,
+} from './snapshot/index.js';
+export type {
+  CapturedSnapshot,
+  InferredTransition,
+  SpecSnapshotOptions,
+} from './snapshot/index.js';
+
 export { findRelevantCode, extractKeywords, walkFileTree } from './retriever/index.js';
 export {
   verifyRequirement,
@@ -48,6 +81,5 @@ export {
   validateCodePath,
   buildReport,
   reportToExitCode,
-  SpecTruthError,
 } from './verify.js';
-export type { VerifyOptions, SpecTruthErrorCode } from './verify.js';
+export type { VerifyOptions } from './verify.js';
