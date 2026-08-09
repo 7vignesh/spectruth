@@ -203,22 +203,24 @@ export function formatMatrixReport(report: VerificationReport): string {
   lines.push(color('─'.repeat(88), c.gray));
   lines.push(
     color(
-      ' ID      │ Status  │ Score      │ Evidence                                  ',
+      ' ID      │ Status  │ Score      │ Evidence                                 ',
       c.dim
     )
   );
   lines.push(color('─'.repeat(88), c.gray));
 
   for (const result of report.results) {
-    const id = result.requirement.id.padEnd(7);
+    const id = truncate(result.requirement.id, 7);
     const status = padVisible(verdictIcon(result.overallVerdict) + ' ' + result.overallVerdict, 7);
-    const score = result.score.padEnd(10);
+    // Compact the score: "1/2 criteria met" -> "1/2"
+    const compactScore = result.score.replace(/\s*criteria met$/, '');
+    const score = truncate(compactScore, 10);
 
-    // Best evidence: first PASS file, or first FAIL reason
+    // Best evidence: first criterion that has a file reference
     const firstEvidence = result.criteriaResults.find(cr => cr.evidence.file);
     const evidence = firstEvidence
       ? truncate(firstEvidence.evidence.file, 40)
-      : color('no evidence found', c.dim);
+      : padVisible(color('no evidence found', c.dim), 40);
 
     lines.push(` ${id} │ ${status} │ ${score} │ ${evidence}`);
   }
