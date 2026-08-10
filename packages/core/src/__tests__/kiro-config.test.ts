@@ -90,7 +90,18 @@ describe('SpecTruth agent skill', () => {
     expect(skill).toMatch(/explicit approval in a separate turn/i);
     expect(skill).toMatch(/nothing has been changed/i);
     expect(skill).toMatch(/never modify `tasks\.md`/i);
-    expect(skill).toMatch(/re-run [^\n]*post-task/i);
+    expect(skill).toMatch(/re-run [^\n]*audit --task/i);
+  });
+
+  it('documents the audit command as the primary entry point', () => {
+    expect(skill).toMatch(/audit --json/);
+    expect(skill).toMatch(/audit --task/);
+    expect(skill).toMatch(/needs no snapshot/i);
+  });
+
+  it('documents that approval is bound and can be refused', () => {
+    expect(skill).toMatch(/bound to one preview/i);
+    expect(skill).toMatch(/approval is refused/i);
   });
 
   it('documents the exit-code contract for a blocked decision', () => {
@@ -113,18 +124,36 @@ describe('SpecTruth custom agent', () => {
     expect(resources).toContain('skill://.kiro/skills/spectruth/SKILL.md');
   });
 
-  it('cannot write files, so it cannot repair without approval', () => {
+  it('may write code for an approved repair but never auto-approves it', () => {
     const tools = agent.tools as string[];
-    expect(tools).not.toContain('write');
+    const allowed = agent.allowedTools as string[];
+
+    expect(tools).toContain('write');
     expect(tools).toContain('read');
     expect(tools).toContain('shell');
+    // Writing always requires a confirmation, so a repair cannot happen silently.
+    expect(allowed).not.toContain('write');
+    expect(allowed).not.toContain('shell');
+  });
+
+  it('forbids writing tasks.md so it cannot mark a task complete', () => {
+    const settings = agent.toolsSettings as { write?: { deniedPaths?: string[] } };
+    const denied = settings.write?.deniedPaths ?? [];
+    expect(denied.some(path => path.includes('tasks.md'))).toBe(true);
   });
 
   it('auto-approves only read-only tools', () => {
     const allowed = agent.allowedTools as string[];
     expect(allowed).toEqual(expect.arrayContaining(['read', 'grep', 'glob']));
-    expect(allowed).not.toContain('shell');
-    expect(allowed).not.toContain('write');
+  });
+
+  it('permits the audit, preview, and approve commands', () => {
+    const settings = agent.toolsSettings as { shell: { allowedCommands: string[] } };
+    const patterns = settings.shell.allowedCommands.join('\n');
+
+    for (const command of ['audit', 'preview', 'approve']) {
+      expect(patterns).toContain(command);
+    }
   });
 
   it('restricts shell execution to spectruth commands', () => {
@@ -135,16 +164,18 @@ describe('SpecTruth custom agent', () => {
     }
   });
 
-  it('permits the CLI invocation its prompt tells it to use', () => {
+  it('permits every CLI invocation its prompt tells it to use', () => {
     const settings = agent.toolsSettings as { shell: { allowedCommands: string[] } };
     const prompt = agent.prompt as string;
-    const promptCommand = prompt.match(/`([^`]*index\.js report[^`]*)`/)?.[1];
+    const quoted = [...prompt.matchAll(/`([^`]*index\.js[^`]*)`/g)].map(match => match[1]);
 
-    expect(promptCommand).toBeDefined();
-    const permitted = settings.shell.allowedCommands.some(pattern =>
-      new RegExp(`^${pattern}$`).test(promptCommand!),
-    );
-    expect(permitted).toBe(true);
+    expect(quoted.length).toBeGreaterThan(0);
+    for (const command of quoted) {
+      const permitted = settings.shell.allowedCommands.some(pattern =>
+        new RegExp(`^${pattern}$`).test(command),
+      );
+      expect(permitted, `prompt command not permitted: ${command}`).toBe(true);
+    }
   });
 
   it('describes Done Integrity rather than generic conformance verdicts', () => {

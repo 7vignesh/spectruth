@@ -382,6 +382,7 @@ describe('evidence item builders', () => {
     location: { file: 'tasks.md', line: 6 },
     changedFiles: [{ path: 'src/records.ts', change: 'modified' }],
     gitHeadChanged: false,
+    inferredFrom: 'snapshot-pair',
   };
 
   it('marks transition evidence as non-supporting', () => {
@@ -389,6 +390,14 @@ describe('evidence item builders', () => {
     expect(item.source).toBe('task-transition');
     expect(item.supports).toBe(false);
     expect(item.observation).toContain('transitioned from not_started to completed');
+  });
+
+  it('does not claim an observed transition for a current-state audit', () => {
+    const item = transitionToEvidence({ ...transition, inferredFrom: 'current-state' });
+    expect(item.observation).toContain('is currently marked complete');
+    expect(item.observation).toContain('no transition was observed');
+    expect(item.observation).not.toContain('transitioned from');
+    expect(item.supports).toBe(false);
   });
 
   it('marks a deleted file as non-supporting diff evidence', () => {
