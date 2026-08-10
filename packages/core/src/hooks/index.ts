@@ -12,14 +12,17 @@
  *   snapshot, or task inference that cannot identify exactly one task.
  */
 
-import type { AuditReport, TransitionInference } from '../types.js';
+import type { AuditReport, CriterionAudit, TransitionInference } from '../types.js';
 import { SpecTruthError } from '../errors.js';
 import { buildPendingCriteriaAudits, buildTaskAuditReport } from '../audit/task-report.js';
+import { buildEvidenceBundle } from '../evidence/bundle.js';
+import { adjudicateBundle } from '../evidence/adjudicate.js';
 import { formatHookSummary, formatNoTransitionSummary } from '../reporter/hook.js';
 import { saveReport } from '../report/store.js';
 import { captureSpecSnapshot, inferCompletedTaskForSpec } from '../snapshot/index.js';
 import { recordHookEvent } from './events.js';
 import { resolveSingleSpecDir } from './spec-discovery.js';
+import { createProvider } from '../verifier/provider.js';
 
 export interface HookOptions {
   /** Project root; also the default codebase and snapshot location. */
@@ -67,7 +70,7 @@ export function runPreTaskHook(options: HookOptions): HookResult {
   }
 }
 
-export function runPostTaskHook(options: HookOptions): HookResult {
+export async function runPostTaskHook(options: HookOptions): Promise<HookResult> {
   const eventPath = recordHookEvent(options.projectRoot, 'PostTaskExec', options.event, options.now);
 
   try {
@@ -86,10 +89,26 @@ export function runPostTaskHook(options: HookOptions): HookResult {
 
     const transition = result.inference.transition;
     const links = result.spec.links.find(link => link.taskId === transition.taskId);
+    const criteria = links?.criteria ?? [];
+
+    // Collect and adjudicate real evidence when possible
+    let auditedCriteria: CriterionAudit[];
+    if (criteria.length > 0) {
+      const bundle = await buildEvidenceBundle({
+        spec: result.spec,
+        transition,
+        codebasePath: codePath,
+      });
+      const provider = resolveOptionalProvider();
+      auditedCriteria = await adjudicateBundle({ bundle, provider });
+    } else {
+      auditedCriteria = [];
+    }
+
     const report = buildTaskAuditReport({
       spec: result.spec,
       transition,
-      criteria: buildPendingCriteriaAudits(links?.criteria ?? [], transition),
+      criteria: auditedCriteria,
       codebasePath: codePath,
       ...(options.now ? { now: options.now } : {}),
     });
@@ -158,4 +177,13 @@ function operationalFailure(error: unknown): HookResult {
 
 function withEventPath(result: HookResult, eventPath: string | undefined): HookResult {
   return eventPath ? { ...result, eventPath } : result;
+}
+
+/** Best-effort provider resolution — returns undefined when no LLM is configured. */
+function resolveOptionalProvider() {
+  try {
+    return createProvider();
+  } catch {
+    return undefined;
+  }
 }

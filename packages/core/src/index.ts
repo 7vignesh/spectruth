@@ -69,6 +69,28 @@ export type { SavedReport } from './report/store.js';
 
 export { runPreTaskHook, runPostTaskHook } from './hooks/index.js';
 export type { HookOptions, HookResult } from './hooks/index.js';
+
+export {
+  buildEvidenceBundle,
+  adjudicateBundle,
+  buildAdjudicationPrompt,
+  collectDiffHunks,
+  collectSourceSnippets,
+  collectStaticFindings,
+  diffHunksToEvidence,
+  sourceSnippetsToEvidence,
+  staticFindingsToEvidence,
+  transitionToEvidence,
+  DEFAULT_MAX_DIFF_HUNKS,
+  DEFAULT_MAX_SNIPPETS_PER_CRITERION,
+} from './evidence/index.js';
+export type {
+  TaskEvidenceBundle,
+  DiffHunk,
+  StaticFinding,
+  BuildBundleOptions,
+  AdjudicateOptions,
+} from './evidence/index.js';
 export { findSpecDirs, resolveSingleSpecDir, SPECS_DIR } from './hooks/spec-discovery.js';
 export { HOOK_EVENT_DIR, hookEventDirFor, recordHookEvent } from './hooks/events.js';
 export type { RecordedHookEvent } from './hooks/events.js';

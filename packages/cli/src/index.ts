@@ -97,7 +97,7 @@ hookOptions(
     .description('Infer the completed task and audit its completion claim'),
 ).action(async (options: HookCommandOptions) => {
   const event = await readEventPayload(options.stdin !== false);
-  emit(runPostTaskHook({
+  emit(await runPostTaskHook({
     projectRoot: options.root,
     ...(options.spec ? { specDir: options.spec } : {}),
     ...(options.code ? { codePath: options.code } : {}),
