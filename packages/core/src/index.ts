@@ -55,12 +55,47 @@ export {
   PENDING_ADJUDICATION_JUSTIFICATION,
 } from './audit/task-report.js';
 export type { BuildTaskAuditReportInput } from './audit/task-report.js';
+export { computeReportId } from './audit/identity.js';
+export { runAudit, synthesizeTransition } from './audit/run.js';
+export type { AuditOptions, AuditRunResult, TaskAuditOutcome } from './audit/run.js';
+
+export {
+  PREVIEW_DIR,
+  APPROVAL_DIR,
+  PROTECTED_PATHS,
+  approvalDirFor,
+  approvalPathFor,
+  approveRepair,
+  assertApproved,
+  buildRepairPreviews,
+  checkApproval,
+  compareReports,
+  computePreviewId,
+  computeStateFingerprint,
+  findPreview,
+  formatReauditSummary,
+  isProtectedPath,
+  previewDirFor,
+  previewPathFor,
+  readApproval,
+  readPreviews,
+  reauditTask,
+  savePreviews,
+} from './repair/index.js';
+export type {
+  ApproveOptions,
+  ApprovalCheckOptions,
+  CriterionDelta,
+  ReauditOptions,
+  ReauditResult,
+} from './repair/index.js';
 
 export {
   LATEST_REPORT_FILE,
   REPORT_DIR,
   latestReportPath,
   readLatestReport,
+  readReportForTask,
   reportDirFor,
   reportPathFor,
   saveReport,
