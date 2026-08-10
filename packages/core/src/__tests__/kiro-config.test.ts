@@ -10,13 +10,10 @@ function readJson(path: string): Record<string, unknown> {
 }
 
 interface HookDocument {
+  name: string;
   version: string;
-  hooks: Array<{
-    name: string;
-    trigger: string;
-    action: { type: string; command: string };
-    timeout?: number;
-  }>;
+  when: { type: string };
+  then: { type: string; command: string };
 }
 
 describe('paired Kiro task hooks', () => {
@@ -27,29 +24,19 @@ describe('paired Kiro task hooks', () => {
     expect(existsSync(join(KIRO, 'hooks', 'spectruth-verify.json'))).toBe(false);
   });
 
-  it('registers PreTaskExec for snapshot capture', () => {
-    expect(pre.hooks).toHaveLength(1);
-    expect(pre.hooks[0].trigger).toBe('PreTaskExec');
-    expect(pre.hooks[0].action.command).toMatch(/\bpre-task\b/);
-    expect(pre.hooks[0].timeout).toBeGreaterThan(0);
+  it('registers preTaskExecution for snapshot capture', () => {
+    expect(pre.when.type).toBe('preTaskExecution');
+    expect(pre.then.command).toMatch(/\bpre-task\b/);
   });
 
-  it('registers PostTaskExec for the completion audit', () => {
-    expect(post.hooks).toHaveLength(1);
-    expect(post.hooks[0].trigger).toBe('PostTaskExec');
-    expect(post.hooks[0].action.command).toMatch(/\bpost-task\b/);
-    expect(post.hooks[0].timeout).toBeGreaterThan(0);
+  it('registers postTaskExecution for the completion audit', () => {
+    expect(post.when.type).toBe('postTaskExecution');
+    expect(post.then.command).toMatch(/\bpost-task\b/);
   });
 
-  /**
-   * `npx spectruth` cannot resolve until the package is installed or published,
-   * so the shipped hooks must invoke the built entry point that exists today.
-   */
   it('invokes a command that resolves in this workspace', () => {
     for (const document of [pre, post]) {
-      const command = document.hooks[0].action.command;
-      expect(command).toContain('node packages/cli/dist/index.js');
-      expect(command).not.toMatch(/^npx spectruth/);
+      expect(document.then.command).toContain('node packages/cli/dist/index.js');
     }
   });
 
@@ -58,10 +45,19 @@ describe('paired Kiro task hooks', () => {
     expect(existsSync(entry)).toBe(true);
   });
 
+  it('uses the correct Kiro hook schema with when/then', () => {
+    for (const document of [pre, post]) {
+      expect(document.version).toBe('1.0.0');
+      expect(document.then.type).toBe('runCommand');
+      expect(document).not.toHaveProperty('hooks');
+      expect(document).not.toHaveProperty('trigger');
+    }
+  });
+
   it('does not run the obsolete verify command or glob a spec file', () => {
     for (const document of [pre, post]) {
-      expect(document.hooks[0].action.command).not.toContain('verify');
-      expect(document.hooks[0].action.command).not.toContain('*');
+      expect(document.then.command).not.toContain('verify');
+      expect(document.then.command).not.toContain('*');
     }
   });
 });

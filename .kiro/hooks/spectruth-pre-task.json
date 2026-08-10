@@ -1,14 +1,9 @@
 {
-  "version": "v1",
-  "hooks": [
-    {
-      "name": "SpecTruth Pre-Task Snapshot",
-      "trigger": "PreTaskExec",
-      "action": {
-        "type": "command",
-        "command": "node packages/cli/dist/index.js pre-task"
-      },
-      "timeout": 30
-    }
-  ]
+  "name": "SpecTruth Pre-Task Snapshot",
+  "version": "1.0.0",
+  "when": { "type": "preTaskExecution" },
+  "then": {
+    "type": "runCommand",
+    "command": "node packages/cli/dist/index.js pre-task"
+  }
 }
