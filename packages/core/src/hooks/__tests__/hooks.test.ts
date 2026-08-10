@@ -7,7 +7,6 @@ import { findSpecDirs, resolveSingleSpecDir } from '../spec-discovery.js';
 import { hookEventDirFor, recordHookEvent } from '../events.js';
 import { latestReportPath, readLatestReport } from '../../report/store.js';
 import { snapshotPathFor } from '../../snapshot/index.js';
-import { PENDING_ADJUDICATION_JUSTIFICATION } from '../../audit/task-report.js';
 
 const REQUIREMENTS = `# Records — Requirements
 
@@ -54,12 +53,12 @@ function completeSecondTask(): void {
 }
 
 describe('spec discovery', () => {
-  it('finds a single spec directory', () => {
+  it('finds a single spec directory', async () => {
     expect(findSpecDirs(root)).toEqual([specDir]);
     expect(resolveSingleSpecDir(root)).toBe(specDir);
   });
 
-  it('reports ambiguity instead of guessing between specs', () => {
+  it('reports ambiguity instead of guessing between specs', async () => {
     const second = join(root, '.kiro', 'specs', 'billing');
     mkdirSync(second, { recursive: true });
     writeFileSync(join(second, 'requirements.md'), REQUIREMENTS, 'utf-8');
@@ -69,21 +68,21 @@ describe('spec discovery', () => {
     );
   });
 
-  it('throws when no spec exists', () => {
+  it('throws when no spec exists', async () => {
     rmSync(join(root, '.kiro'), { recursive: true, force: true });
     expect(() => resolveSingleSpecDir(root)).toThrowError(
       expect.objectContaining({ code: 'SPEC_DIR_NOT_FOUND' }),
     );
   });
 
-  it('ignores directories without requirements.md', () => {
+  it('ignores directories without requirements.md', async () => {
     mkdirSync(join(root, '.kiro', 'specs', 'draft'), { recursive: true });
     expect(findSpecDirs(root)).toEqual([specDir]);
   });
 });
 
 describe('runPreTaskHook', () => {
-  it('captures a snapshot and exits 0', () => {
+  it('captures a snapshot and exits 0', async () => {
     const result = runPreTaskHook({ projectRoot: root });
 
     expect(result.exitCode).toBe(0);
@@ -93,11 +92,11 @@ describe('runPreTaskHook', () => {
     expect(existsSync(snapshotPathFor(root, 'records'))).toBe(true);
   });
 
-  it('discovers the spec when none is given', () => {
+  it('discovers the spec when none is given', async () => {
     expect(runPreTaskHook({ projectRoot: root }).exitCode).toBe(0);
   });
 
-  it('exits non-zero when the spec is ambiguous', () => {
+  it('exits non-zero when the spec is ambiguous', async () => {
     const second = join(root, '.kiro', 'specs', 'billing');
     mkdirSync(second, { recursive: true });
     writeFileSync(join(second, 'requirements.md'), REQUIREMENTS, 'utf-8');
@@ -108,7 +107,7 @@ describe('runPreTaskHook', () => {
     expect(result.stderr).toContain('SPEC_AMBIGUOUS');
   });
 
-  it('records the hook payload without depending on it', () => {
+  it('records the hook payload without depending on it', async () => {
     const result = runPreTaskHook({
       projectRoot: root,
       event: { hook_event_name: 'PreTaskExec', cwd: root },
@@ -121,7 +120,7 @@ describe('runPreTaskHook', () => {
     expect(recorded.payload.hook_event_name).toBe('PreTaskExec');
   });
 
-  it('succeeds when no payload is supplied at all', () => {
+  it('succeeds when no payload is supplied at all', async () => {
     const result = runPreTaskHook({ projectRoot: root });
     expect(result.exitCode).toBe(0);
     expect(result.eventPath).toBeUndefined();
@@ -129,11 +128,11 @@ describe('runPreTaskHook', () => {
 });
 
 describe('runPostTaskHook', () => {
-  it('audits the completed task and exits 0', () => {
+  it('audits the completed task and exits 0', async () => {
     runPreTaskHook({ projectRoot: root });
     completeSecondTask();
 
-    const result = runPostTaskHook({ projectRoot: root });
+    const result = await runPostTaskHook({ projectRoot: root });
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe('');
@@ -143,143 +142,160 @@ describe('runPostTaskHook', () => {
       taskTitle: 'Enforce record ownership',
     });
     expect(result.stdout).toContain('Completed task 2');
-    expect(result.stdout).toContain('Ship decision: REVIEW_REQUIRED');
+    // The linked criterion demands a 403 for a non-owner, and no enforcement
+    // exists, so the security rule blocks the claim.
+    expect(result.stdout).toContain('Ship decision: BLOCKED');
   });
 
-  it('reports only the criteria linked to the completed task', () => {
+  it('reports only the criteria linked to the completed task', async () => {
     runPreTaskHook({ projectRoot: root });
     completeSecondTask();
 
-    const report = runPostTaskHook({ projectRoot: root }).report!;
+    const report = (await runPostTaskHook({ projectRoot: root })).report!;
     const criteria = report.requirements.flatMap(requirement => requirement.criteria);
     expect(criteria.map(criterion => criterion.criterionId)).toEqual(['REQ-1-AC-2']);
   });
 
-  it('never fabricates support before adjudication exists', () => {
+  it('blocks a security-sensitive criterion that has no enforcement evidence', async () => {
     runPreTaskHook({ projectRoot: root });
     completeSecondTask();
 
-    const report = runPostTaskHook({ projectRoot: root }).report!;
+    const report = (await runPostTaskHook({ projectRoot: root })).report!;
     const criterion = report.requirements[0].criteria[0];
-    expect(criterion.state).toBe('UNVERIFIED');
-    expect(criterion.justification).toBe(PENDING_ADJUDICATION_JUSTIFICATION);
-    expect(report.summary.shipStatus).toBe('REVIEW_REQUIRED');
+
+    expect(criterion.state).toBe('UNSUPPORTED');
+    expect(criterion.justification).toMatch(/security-sensitive/i);
+    expect(criterion.justification.trim().length).toBeGreaterThan(0);
+    expect(criterion.gaps.length).toBeGreaterThan(0);
+    expect(report.summary.shipStatus).toBe('BLOCKED');
     expect(report.summary.states.supported).toBe(0);
+    expect(report.summary.states.unsupported).toBe(1);
   });
 
-  it('carries task-transition evidence that does not by itself support the criterion', () => {
+  it('offers a repair preview for a blocking finding', async () => {
+    runPreTaskHook({ projectRoot: root });
+    completeSecondTask();
+
+    const result = await runPostTaskHook({ projectRoot: root });
+    expect(result.report!.requirements[0].criteria[0].repairPreviewAvailable).toBe(true);
+    expect(result.stdout).toContain('repair preview is available');
+    expect(result.stdout).toContain('change nothing until you approve');
+  });
+
+  it('carries transition and static evidence for the finding', async () => {
     runPreTaskHook({ projectRoot: root });
     writeFileSync(join(root, 'src', 'authorization.ts'), 'export function assertOwner() {}\n');
     completeSecondTask();
 
-    const report = runPostTaskHook({ projectRoot: root }).report!;
+    const report = (await runPostTaskHook({ projectRoot: root })).report!;
     const evidence = report.requirements[0].criteria[0].evidence;
-    expect(evidence).toHaveLength(1);
-    expect(evidence[0].source).toBe('task-transition');
-    expect(evidence[0].supports).toBe(false);
-    expect(evidence[0].observation).toContain('changed from not_started to completed');
-    expect(evidence[0].observation).toContain('changed file');
+    const sources = evidence.map(item => item.source);
+
+    expect(sources).toContain('task-transition');
+    const transition = evidence.find(item => item.source === 'task-transition')!;
+    expect(transition.supports).toBe(false);
+    expect(transition.observation).toContain('transitioned from not_started to completed');
   });
 
-  it('persists the report and a latest pointer', () => {
+  it('persists the report and a latest pointer', async () => {
     runPreTaskHook({ projectRoot: root });
     completeSecondTask();
 
-    const result = runPostTaskHook({ projectRoot: root });
+    const result = await runPostTaskHook({ projectRoot: root });
     expect(existsSync(result.reportPath!)).toBe(true);
     expect(existsSync(latestReportPath(root))).toBe(true);
     expect(readLatestReport(root).scope).toEqual(result.report!.scope);
     expect(result.stdout).toContain('Full report:');
   });
 
-  it('exits 0 and reports a no-op when nothing completed', () => {
+  it('exits 0 and reports a no-op when nothing completed', async () => {
     runPreTaskHook({ projectRoot: root });
 
-    const result = runPostTaskHook({ projectRoot: root });
+    const result = await runPostTaskHook({ projectRoot: root });
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain('No completed task to audit');
     expect(result.report).toBeUndefined();
   });
 
-  it('exits non-zero when several tasks completed at once', () => {
+  it('exits non-zero when several tasks completed at once', async () => {
     writeFileSync(join(specDir, 'tasks.md'), '# T\n\n- [ ] 1. A\n- [ ] 2. B\n', 'utf-8');
     runPreTaskHook({ projectRoot: root });
     writeFileSync(join(specDir, 'tasks.md'), '# T\n\n- [x] 1. A\n- [x] 2. B\n', 'utf-8');
 
-    const result = runPostTaskHook({ projectRoot: root });
+    const result = await runPostTaskHook({ projectRoot: root });
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('MULTIPLE_COMPLETED_TRANSITIONS');
     expect(result.stderr).toContain('Candidate tasks: 1, 2');
   });
 
-  it('exits non-zero when no pre-task snapshot exists', () => {
+  it('exits non-zero when no pre-task snapshot exists', async () => {
     completeSecondTask();
 
-    const result = runPostTaskHook({ projectRoot: root });
+    const result = await runPostTaskHook({ projectRoot: root });
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('SNAPSHOT_NOT_FOUND');
   });
 
-  it('explains when the completed task references no requirement', () => {
+  it('explains when the completed task references no requirement', async () => {
     writeFileSync(join(specDir, 'tasks.md'), '# T\n\n- [ ] 1. Unlinked task\n', 'utf-8');
     runPreTaskHook({ projectRoot: root });
     writeFileSync(join(specDir, 'tasks.md'), '# T\n\n- [x] 1. Unlinked task\n', 'utf-8');
 
-    const result = runPostTaskHook({ projectRoot: root });
+    const result = await runPostTaskHook({ projectRoot: root });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('references no requirement');
     expect(result.report!.summary.totalCriteria).toBe(0);
   });
 
-  it('does not leak provider or environment configuration into stdout', () => {
+  it('does not leak provider or environment configuration into stdout', async () => {
     runPreTaskHook({ projectRoot: root });
     completeSecondTask();
 
-    const stdout = runPostTaskHook({ projectRoot: root }).stdout;
+    const stdout = (await runPostTaskHook({ projectRoot: root })).stdout;
     expect(stdout).not.toMatch(/API_KEY|ANTHROPIC|OPENAI|token/i);
   });
 
-  it('emits no ANSI escape sequences for Kiro context', () => {
+  it('emits no ANSI escape sequences for Kiro context', async () => {
     runPreTaskHook({ projectRoot: root });
     completeSecondTask();
 
     // eslint-disable-next-line no-control-regex
-    expect(runPostTaskHook({ projectRoot: root }).stdout).not.toMatch(/\x1b\[/);
+    expect((await runPostTaskHook({ projectRoot: root })).stdout).not.toMatch(/\x1b\[/);
   });
 
-  it('produces identical stdout for identical state', () => {
+  it('produces identical stdout for identical state', async () => {
     runPreTaskHook({ projectRoot: root });
     completeSecondTask();
     const now = () => new Date('2026-08-10T00:00:00.000Z');
 
-    const first = runPostTaskHook({ projectRoot: root, now });
-    const second = runPostTaskHook({ projectRoot: root, now });
+    const first = await runPostTaskHook({ projectRoot: root, now });
+    const second = await runPostTaskHook({ projectRoot: root, now });
     expect(second.stdout).toBe(first.stdout);
   });
 
-  it('works under a project path containing spaces', () => {
+  it('works under a project path containing spaces', async () => {
     expect(root).toContain(' ');
     runPreTaskHook({ projectRoot: root });
     completeSecondTask();
-    expect(runPostTaskHook({ projectRoot: root }).exitCode).toBe(0);
+    expect((await runPostTaskHook({ projectRoot: root })).exitCode).toBe(0);
   });
 });
 
 describe('recordHookEvent', () => {
-  it('skips recording when there is no payload', () => {
+  it('skips recording when there is no payload', async () => {
     expect(recordHookEvent(root, 'PostTaskExec', undefined)).toBeUndefined();
     expect(existsSync(hookEventDirFor(root))).toBe(false);
   });
 
-  it('records an unparsed payload wrapper', () => {
+  it('records an unparsed payload wrapper', async () => {
     const path = recordHookEvent(root, 'PostTaskExec', { unparsedPayload: 'not json' });
     expect(path).toBeDefined();
     expect(JSON.parse(readFileSync(path!, 'utf-8')).payload.unparsedPayload).toBe('not json');
   });
 
-  it('retains at most twenty recorded events', () => {
+  it('retains at most twenty recorded events', async () => {
     for (let index = 0; index < 25; index++) {
       recordHookEvent(
         root,
