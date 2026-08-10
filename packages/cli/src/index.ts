@@ -17,10 +17,16 @@
 
 import { Command } from 'commander';
 import {
+  approveRepair,
+  buildRepairPreviews,
   formatHookSummary,
   readLatestReport,
+  readPreviews,
+  resolveSingleSpecDir,
+  runAudit,
   runPostTaskHook,
   runPreTaskHook,
+  savePreviews,
   SpecTruthError,
   type HookResult,
 } from '@spectruth/core';
@@ -120,12 +126,159 @@ program
       );
       process.exit(0);
     } catch (error) {
-      const message = error instanceof SpecTruthError
-        ? `SpecTruth (${error.code}): ${error.message}.${error.hint ? ` ${error.hint}` : ''}`
-        : `SpecTruth error: ${error instanceof Error ? error.message : String(error)}`;
-      process.stderr.write(`${message}\n`);
-      process.exit(1);
+      fail(error);
     }
   });
+
+// ─── Agent-facing commands ───────────────────────────────────────────────────
+
+/**
+ * The primary entry point. A Kiro agent runs this when a user asks whether the
+ * work is actually done, so it must need no prior snapshot.
+ */
+program
+  .command('audit')
+  .description('Audit the completion claims of tasks that are marked complete')
+  .option('--spec <path>', 'Kiro spec directory (auto-detected when omitted)')
+  .option('--task <id>', 'Audit one task instead of every completed task')
+  .option('--code <path>', 'Codebase root (defaults to the project root)')
+  .option('--root <path>', 'Project root for reports and previews', process.cwd())
+  .option('--deterministic', 'Skip LLM adjudication and use deterministic evidence only')
+  .option('--json', 'Emit structured JSON for an agent to consume')
+  .action(async (options: {
+    spec?: string;
+    task?: string;
+    code?: string;
+    root: string;
+    deterministic?: boolean;
+    json?: boolean;
+  }) => {
+    try {
+      const specDir = options.spec ?? resolveSingleSpecDir(options.root);
+      const run = await runAudit({
+        projectRoot: options.root,
+        specDir,
+        ...(options.code ? { codePath: options.code } : {}),
+        ...(options.task ? { taskId: options.task } : {}),
+        ...(options.deterministic ? { deterministicOnly: true } : {}),
+      });
+
+      // Previews are generated alongside the audit but change nothing.
+      const previewsByReport = run.outcomes.map(outcome => {
+        const previews = buildRepairPreviews(outcome.report);
+        if (previews.length > 0) {
+          savePreviews(options.root, outcome.report.reportId, previews);
+        }
+        return { reportId: outcome.report.reportId, previews };
+      });
+
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify({
+          spec: run.spec.name,
+          reports: run.outcomes.map(outcome => outcome.report),
+          previews: previewsByReport,
+          unlinkedTaskIds: run.unlinkedTaskIds,
+        }, null, 2)}\n`);
+      } else {
+        const sections = run.outcomes.map(outcome => {
+          const previews = previewsByReport
+            .find(entry => entry.reportId === outcome.report.reportId)?.previews ?? [];
+          return [
+            formatHookSummary(outcome.report, { reportPath: outcome.reportPath }),
+            ...previews.map(preview =>
+              `Repair preview ${preview.previewId} for ${preview.criterionId}: ${preview.proposedChange}`,
+            ),
+            previews.length > 0
+              ? 'Nothing has been changed. Approve a preview id to authorize that repair.'
+              : '',
+          ].filter(Boolean).join('\n');
+        });
+
+        if (run.unlinkedTaskIds.length > 0) {
+          sections.push(
+            `Skipped tasks with no requirement reference: ${run.unlinkedTaskIds.join(', ')}`,
+          );
+        }
+        process.stdout.write(`${sections.join('\n\n')}\n`);
+      }
+
+      process.exit(0);
+    } catch (error) {
+      fail(error);
+    }
+  });
+
+program
+  .command('preview')
+  .description('List the repair previews recorded for a report')
+  .requiredOption('--report <id>', 'Report id the previews belong to')
+  .option('--root <path>', 'Project root that holds the previews', process.cwd())
+  .option('--json', 'Print the raw preview JSON')
+  .action((options: { report: string; root: string; json?: boolean }) => {
+    const previews = readPreviews(options.root, options.report);
+
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(previews, null, 2)}\n`);
+      process.exit(0);
+    }
+
+    if (previews.length === 0) {
+      process.stdout.write(`No repair previews recorded for report ${options.report}.\n`);
+      process.exit(0);
+    }
+
+    const lines = previews.flatMap(preview => [
+      `${preview.previewId} — ${preview.criterionId} [${preview.currentState}]`,
+      `  gap: ${preview.gap}`,
+      `  proposed: ${preview.proposedChange}`,
+      `  expected afterwards: ${preview.expectedEvidence}`,
+      preview.likelyFiles.length > 0 ? `  likely files: ${preview.likelyFiles.join(', ')}` : '',
+    ].filter(Boolean));
+
+    lines.push('', 'Nothing has been changed. Approve a preview id to authorize that repair.');
+    process.stdout.write(`${lines.join('\n')}\n`);
+    process.exit(0);
+  });
+
+/**
+ * Records explicit consent for one preview. This is expected to run only after
+ * the user has seen the preview and approved it in a separate turn.
+ */
+program
+  .command('approve')
+  .description('Record explicit approval for one repair preview')
+  .requiredOption('--preview <id>', 'Preview id being approved')
+  .requiredOption('--report <id>', 'Report id the preview belongs to')
+  .option('--code <path>', 'Codebase root (defaults to the project root)')
+  .option('--root <path>', 'Project root that holds the previews', process.cwd())
+  .action((options: { preview: string; report: string; code?: string; root: string }) => {
+    try {
+      const approval = approveRepair({
+        projectRoot: options.root,
+        reportId: options.report,
+        previewId: options.preview,
+        ...(options.code ? { codePath: options.code } : {}),
+      });
+
+      process.stdout.write([
+        `Approved repair ${approval.previewId} for ${approval.criterionId}.`,
+        `Authorized scope: ${approval.approvedChange}`,
+        'Only this change is authorized. tasks.md must not be edited, and the task',
+        'must not be marked complete by the repair.',
+        `Re-audit with: audit --task ${approval.taskId}`,
+      ].join('\n') + '\n');
+      process.exit(0);
+    } catch (error) {
+      fail(error);
+    }
+  });
+
+function fail(error: unknown): never {
+  const message = error instanceof SpecTruthError
+    ? `SpecTruth (${error.code}): ${error.message}${error.hint ? ` ${error.hint}` : ''}`
+    : `SpecTruth error: ${error instanceof Error ? error.message : String(error)}`;
+  process.stderr.write(`${message}\n`);
+  process.exit(1);
+}
 
 program.parse();
