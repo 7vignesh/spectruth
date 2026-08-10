@@ -36,47 +36,71 @@ is `UNSUPPORTED` and therefore `BLOCKED`. It is never softened to `UNVERIFIED`.
 The CLI is not published yet, so it runs from the built entry point. Build once
 with `cd packages/core; npx tsc` then `cd ../cli; npx tsc`.
 
-Read-only:
+The primary command needs no snapshot and is what you should normally run:
 
 ```bash
-node packages/cli/dist/index.js report          # concise summary of the latest audit
-node packages/cli/dist/index.js report --json   # full report with evidence and gaps
+node packages/cli/dist/index.js audit --json                 # every completed task
+node packages/cli/dist/index.js audit --task 3.2 --json      # one task
+node packages/cli/dist/index.js audit --deterministic --json # no LLM adjudication
 ```
 
-Audit lifecycle, normally run by the paired task hooks:
+Repair protocol:
 
 ```bash
-node packages/cli/dist/index.js pre-task        # snapshot task states, Git state, fingerprints
-node packages/cli/dist/index.js post-task       # infer the completed task and audit it
+node packages/cli/dist/index.js preview --report <reportId> --json
+node packages/cli/dist/index.js approve --report <reportId> --preview <previewId>
 ```
 
-Once the package is installed or published these become `npx spectruth report`,
-`npx spectruth pre-task`, and `npx spectruth post-task`.
+Reading a previous result, and the paired hooks:
+
+```bash
+node packages/cli/dist/index.js report --json     # most recent report
+node packages/cli/dist/index.js pre-task          # snapshot before work starts
+node packages/cli/dist/index.js post-task         # audit an observed transition
+```
+
+Once the package is installed or published these become `npx spectruth audit`
+and so on.
 
 ## How to respond to a user
 
-1. Run `node packages/cli/dist/index.js report --json` to read the latest audit.
+When the user asks whether work is done, whether a task is complete, or whether
+something is ready to ship:
+
+1. Run `audit --json` (add `--task <id>` when they named a task).
 2. Lead with the ship decision and the task it applies to.
 3. For each non-`SUPPORTED` criterion, give the state, the justification, and
    the concrete gap. Cite file and line when the evidence has a location.
 4. Never restate a finding as more certain than its state. `UNVERIFIED` means
    unproven, not failing.
-5. If no report exists, say so and suggest completing a spec task or running
-   the post-task audit.
+5. If the audit reports skipped tasks with no requirement reference, say so
+   plainly rather than implying they passed.
+
+Do not run `pre-task` or `post-task` to answer a question. Those exist for the
+observed-transition flow, and `post-task` fails without a prior snapshot.
 
 ## Repair previews require explicit approval
 
-When the user asks how to fix a blocked finding:
+The audit already generates previews for every blocking finding and prints their
+ids. It changes nothing while doing so.
 
-1. Describe the proposed repair as a **preview**: the affected criterion, the
-   evidence gap, the proposed change, and the evidence expected afterwards.
+When the user asks you to fix a finding:
+
+1. Show the preview: its id, the affected criterion, the evidence gap, the
+   proposed change, and the evidence expected afterwards.
 2. State plainly that nothing has been changed.
-3. Ask for explicit approval in a separate turn.
-4. Only after the user approves in that separate turn may you implement the
-   approved scope, and nothing beyond it.
-5. Never modify `tasks.md`, and never mark a task complete.
-6. After an approved repair, re-run `node packages/cli/dist/index.js post-task`
-   so the claim is re-audited rather than assumed fixed.
+3. Ask for explicit approval in a separate turn. Stop there and wait.
+4. Once the user approves, run `approve --report <reportId> --preview <previewId>`
+   to record consent, then implement **only** the authorized scope.
+5. Never modify `tasks.md`, and never mark a task complete. The completion claim
+   belongs to the user; your job is the code change they approved.
+6. Re-run `audit --task <id>` afterwards so the repair is verified independently
+   rather than assumed. Report whether the gap actually closed — if the criterion
+   is still not `SUPPORTED`, say so instead of claiming success.
+
+An approval is bound to one preview, one report, and the state of the files at
+the moment it was granted. If the report or those files have changed, the
+approval is refused and you must ask again.
 
 If the user has not approved, the correct action is to stop and wait.
 
