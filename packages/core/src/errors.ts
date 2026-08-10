@@ -19,6 +19,11 @@ export type SpecTruthErrorCode =
   | 'SNAPSHOT_NOT_FOUND'
   | 'SNAPSHOT_UNREADABLE'
   | 'SNAPSHOT_WRITE_FAILED'
+  | 'REPORT_NOT_FOUND'
+  | 'REPORT_UNREADABLE'
+  | 'REPORT_WRITE_FAILED'
+  | 'SPEC_AMBIGUOUS'
+  | 'TASK_INFERENCE_FAILED'
   | 'VERIFICATION_FAILED';
 
 export class SpecTruthError extends Error {
