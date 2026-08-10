@@ -16,6 +16,7 @@ import type {
 } from '../types.js';
 import { createCriterionAudit } from '../domain/audit.js';
 import { countEvidenceStates, deriveRequirementState, deriveShipStatus } from '../domain/policy.js';
+import { computeReportId } from './identity.js';
 
 export interface BuildTaskAuditReportInput {
   spec: KiroSpec;
@@ -48,23 +49,31 @@ export function buildTaskAuditReport(input: BuildTaskAuditReportInput): TaskAudi
 
   const states = countEvidenceStates(requirements);
   const totalCriteria = requirements.reduce((total, entry) => total + entry.criteria.length, 0);
+  const timestamp = now().toISOString();
+  const summary = {
+    totalRequirements: requirements.length,
+    totalCriteria,
+    states,
+    shipStatus: deriveShipStatus(states),
+  };
 
   return {
+    reportId: computeReportId({
+      specName: spec.name,
+      scopeKey: `task:${transition.taskId}`,
+      requirements,
+      summary,
+    }),
     scope: {
       kind: 'task',
       taskId: transition.taskId,
       taskTitle: transition.title,
     },
     specTitle: spec.requirements.title,
-    timestamp: now().toISOString(),
+    timestamp,
     codebasePath,
     requirements,
-    summary: {
-      totalRequirements: requirements.length,
-      totalCriteria,
-      states,
-      shipStatus: deriveShipStatus(states),
-    },
+    summary,
   };
 }
 

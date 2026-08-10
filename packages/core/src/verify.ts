@@ -14,6 +14,7 @@ import type {
   SpecAuditReport,
 } from './types.js';
 import { countEvidenceStates, deriveShipStatus } from './domain/policy.js';
+import { computeReportId } from './audit/identity.js';
 import { parseSpec } from './parser/index.js';
 import { verifyRequirement } from './verifier/index.js';
 import { createProvider } from './verifier/provider.js';
@@ -130,19 +131,27 @@ export function buildReport(
     (total, requirement) => total + requirement.criteria.length,
     0,
   );
+  const timestamp = new Date().toISOString();
+  const summary = {
+    totalRequirements: requirements.length,
+    totalCriteria,
+    states,
+    shipStatus: deriveShipStatus(states),
+  };
 
   return {
+    reportId: computeReportId({
+      specName: spec.title,
+      scopeKey: 'spec',
+      requirements,
+      summary,
+    }),
     scope: { kind: 'spec' },
     specTitle: spec.title,
-    timestamp: new Date().toISOString(),
+    timestamp,
     codebasePath,
     requirements,
-    summary: {
-      totalRequirements: requirements.length,
-      totalCriteria,
-      states,
-      shipStatus: deriveShipStatus(states),
-    },
+    summary,
   };
 }
 

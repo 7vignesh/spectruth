@@ -24,6 +24,11 @@ export type SpecTruthErrorCode =
   | 'REPORT_WRITE_FAILED'
   | 'SPEC_AMBIGUOUS'
   | 'TASK_INFERENCE_FAILED'
+  | 'TASK_NOT_FOUND'
+  | 'NO_COMPLETED_TASKS'
+  | 'PREVIEW_NOT_FOUND'
+  | 'APPROVAL_REQUIRED'
+  | 'APPROVAL_STALE'
   | 'VERIFICATION_FAILED';
 
 export class SpecTruthError extends Error {

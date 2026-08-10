@@ -206,14 +206,20 @@ export function staticFindingsToEvidence(findings: StaticFinding[]): EvidenceIte
 }
 
 export function transitionToEvidence(transition: CompletedTaskTransition): EvidenceItem {
+  const fileNote = transition.changedFiles.length > 0
+    ? ` with ${transition.changedFiles.length} changed file(s)`
+    : ' with no file changes';
+
+  // An on-demand audit sees only that the box is ticked; it must not claim to
+  // have observed the transition happen.
+  const observation = transition.inferredFrom === 'snapshot-pair'
+    ? `Task ${transition.taskId} transitioned from ${transition.previousState} to completed${fileNote}`
+    : `Task ${transition.taskId} is currently marked complete${fileNote}; no transition was observed`;
+
   return {
     source: 'task-transition' as const,
     location: transition.location,
-    observation:
-      `Task ${transition.taskId} transitioned from ${transition.previousState} to completed`
-      + (transition.changedFiles.length > 0
-        ? ` with ${transition.changedFiles.length} changed file(s)`
-        : ' with no file changes'),
+    observation,
     supports: false, // Transition alone does not prove criterion satisfaction
   };
 }

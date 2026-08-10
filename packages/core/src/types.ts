@@ -120,6 +120,7 @@ export interface TaskAuditScope {
 }
 
 export interface SpecAuditReport {
+  reportId: string;
   scope: SpecAuditScope;
   specTitle: string;
   timestamp: string;
@@ -129,6 +130,7 @@ export interface SpecAuditReport {
 }
 
 export interface TaskAuditReport {
+  reportId: string;
   scope: TaskAuditScope;
   specTitle: string;
   timestamp: string;
@@ -138,6 +140,56 @@ export interface TaskAuditReport {
 }
 
 export type AuditReport = SpecAuditReport | TaskAuditReport;
+
+// ─── Repair Preview and Approval Types ───────────────────────────────────────
+
+/**
+ * A proposed repair. Producing one never changes a file: a preview is a
+ * description of work, not the work itself.
+ */
+export interface RepairPreview {
+  previewId: string;
+  reportId: string;
+  taskId: string;
+  criterionId: string;
+  criterionText: string;
+  currentState: EvidenceState;
+  /** The evidence gap this repair would close. */
+  gap: string;
+  /** What a repair would need to do. */
+  proposedChange: string;
+  /** Files the repair is most likely to touch, when known. */
+  likelyFiles: string[];
+  /** Evidence that should exist once the repair is genuinely done. */
+  expectedEvidence: string;
+}
+
+/**
+ * An explicit approval for exactly one preview.
+ *
+ * The fingerprint pins the repository state that was approved, so an approval
+ * cannot be replayed against a codebase that has since changed.
+ */
+export interface RepairApproval {
+  previewId: string;
+  reportId: string;
+  taskId: string;
+  criterionId: string;
+  approvedAt: string;
+  stateFingerprint: string;
+  /** Exactly what the user authorized, copied so it cannot be widened later. */
+  approvedChange: string;
+}
+
+export type ApprovalRejectionCode =
+  | 'PREVIEW_NOT_FOUND'
+  | 'APPROVAL_NOT_FOUND'
+  | 'REPORT_SUPERSEDED'
+  | 'STATE_CHANGED';
+
+export type ApprovalCheck =
+  | { ok: true; approval: RepairApproval }
+  | { ok: false; code: ApprovalRejectionCode; message: string };
 
 // ─── Kiro Spec Document Types ────────────────────────────────────────────────
 
@@ -267,6 +319,15 @@ export interface FileChange {
   change: FileChangeKind;
 }
 
+/**
+ * How the completed task was established.
+ *
+ * `snapshot-pair` means a real incomplete-to-complete transition was observed
+ * between two snapshots. `current-state` means the task is simply marked
+ * complete right now, which is weaker and must not be reported as observed.
+ */
+export type TransitionProvenance = 'snapshot-pair' | 'current-state';
+
 export interface CompletedTaskTransition {
   taskId: string;
   title: string;
@@ -276,6 +337,7 @@ export interface CompletedTaskTransition {
   renamedFrom?: string;
   changedFiles: FileChange[];
   gitHeadChanged: boolean;
+  inferredFrom: TransitionProvenance;
 }
 
 export type TransitionFailureCode =

@@ -57,6 +57,29 @@ export function readLatestReport(projectRoot: string): AuditReport {
     );
   }
 
+  return parseReportFile(path);
+}
+
+/** Read a previously saved report for one task, when one exists. */
+export function readReportForTask(
+  projectRoot: string,
+  specName: string,
+  taskId: string,
+): AuditReport | undefined {
+  const path = join(
+    reportDirFor(projectRoot),
+    `${sanitize(specName)}-${sanitize(`task-${taskId}`)}.json`,
+  );
+  if (!existsSync(path)) return undefined;
+
+  try {
+    return parseReportFile(path);
+  } catch {
+    return undefined; // A corrupt prior report must not block a fresh audit.
+  }
+}
+
+function parseReportFile(path: string): AuditReport {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, 'utf-8'));
@@ -70,6 +93,7 @@ export function readLatestReport(projectRoot: string): AuditReport {
 
   const candidate = parsed as Partial<AuditReport> | null;
   const valid = candidate
+    && typeof candidate.reportId === 'string'
     && typeof candidate.specTitle === 'string'
     && typeof candidate.timestamp === 'string'
     && Array.isArray(candidate.requirements)

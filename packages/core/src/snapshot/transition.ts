@@ -107,6 +107,7 @@ export function inferCompletedTask(
         && current.git.available
         && previous.git.head !== current.git.head,
       ),
+      inferredFrom: 'snapshot-pair',
     },
   };
 }
