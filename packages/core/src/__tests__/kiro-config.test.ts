@@ -30,15 +30,32 @@ describe('paired Kiro task hooks', () => {
   it('registers PreTaskExec for snapshot capture', () => {
     expect(pre.hooks).toHaveLength(1);
     expect(pre.hooks[0].trigger).toBe('PreTaskExec');
-    expect(pre.hooks[0].action.command).toContain('spectruth pre-task');
+    expect(pre.hooks[0].action.command).toMatch(/\bpre-task\b/);
     expect(pre.hooks[0].timeout).toBeGreaterThan(0);
   });
 
   it('registers PostTaskExec for the completion audit', () => {
     expect(post.hooks).toHaveLength(1);
     expect(post.hooks[0].trigger).toBe('PostTaskExec');
-    expect(post.hooks[0].action.command).toContain('spectruth post-task');
+    expect(post.hooks[0].action.command).toMatch(/\bpost-task\b/);
     expect(post.hooks[0].timeout).toBeGreaterThan(0);
+  });
+
+  /**
+   * `npx spectruth` cannot resolve until the package is installed or published,
+   * so the shipped hooks must invoke the built entry point that exists today.
+   */
+  it('invokes a command that resolves in this workspace', () => {
+    for (const document of [pre, post]) {
+      const command = document.hooks[0].action.command;
+      expect(command).toContain('node packages/cli/dist/index.js');
+      expect(command).not.toMatch(/^npx spectruth/);
+    }
+  });
+
+  it('references the CLI entry point that the build produces', () => {
+    const entry = join(REPO_ROOT, 'packages', 'cli', 'src', 'index.ts');
+    expect(existsSync(entry)).toBe(true);
   });
 
   it('does not run the obsolete verify command or glob a spec file', () => {
@@ -77,7 +94,7 @@ describe('SpecTruth agent skill', () => {
     expect(skill).toMatch(/explicit approval in a separate turn/i);
     expect(skill).toMatch(/nothing has been changed/i);
     expect(skill).toMatch(/never modify `tasks\.md`/i);
-    expect(skill).toMatch(/re-run `npx spectruth post-task`/i);
+    expect(skill).toMatch(/re-run [^\n]*post-task/i);
   });
 
   it('documents the exit-code contract for a blocked decision', () => {
@@ -118,8 +135,20 @@ describe('SpecTruth custom agent', () => {
     const settings = agent.toolsSettings as { shell: { allowedCommands: string[] } };
     expect(settings.shell.allowedCommands.length).toBeGreaterThan(0);
     for (const pattern of settings.shell.allowedCommands) {
-      expect(pattern).toMatch(/^npx spectruth /);
+      expect(pattern).toMatch(/^(npx spectruth |node packages\/cli\/dist\/index\\?\.js )/);
     }
+  });
+
+  it('permits the CLI invocation its prompt tells it to use', () => {
+    const settings = agent.toolsSettings as { shell: { allowedCommands: string[] } };
+    const prompt = agent.prompt as string;
+    const promptCommand = prompt.match(/`([^`]*index\.js report[^`]*)`/)?.[1];
+
+    expect(promptCommand).toBeDefined();
+    const permitted = settings.shell.allowedCommands.some(pattern =>
+      new RegExp(`^${pattern}$`).test(promptCommand!),
+    );
+    expect(permitted).toBe(true);
   });
 
   it('describes Done Integrity rather than generic conformance verdicts', () => {

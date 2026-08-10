@@ -33,30 +33,36 @@ is `UNSUPPORTED` and therefore `BLOCKED`. It is never softened to `UNVERIFIED`.
 
 ## Commands
 
+The CLI is not published yet, so it runs from the built entry point. Build once
+with `cd packages/core; npx tsc` then `cd ../cli; npx tsc`.
+
 Read-only:
 
 ```bash
-npx spectruth report          # concise summary of the latest audit
-npx spectruth report --json   # full report with evidence and gaps
+node packages/cli/dist/index.js report          # concise summary of the latest audit
+node packages/cli/dist/index.js report --json   # full report with evidence and gaps
 ```
 
 Audit lifecycle, normally run by the paired task hooks:
 
 ```bash
-npx spectruth pre-task        # snapshot task states, Git state, fingerprints
-npx spectruth post-task       # infer the completed task and audit it
+node packages/cli/dist/index.js pre-task        # snapshot task states, Git state, fingerprints
+node packages/cli/dist/index.js post-task       # infer the completed task and audit it
 ```
+
+Once the package is installed or published these become `npx spectruth report`,
+`npx spectruth pre-task`, and `npx spectruth post-task`.
 
 ## How to respond to a user
 
-1. Run `npx spectruth report --json` to read the latest audit.
+1. Run `node packages/cli/dist/index.js report --json` to read the latest audit.
 2. Lead with the ship decision and the task it applies to.
 3. For each non-`SUPPORTED` criterion, give the state, the justification, and
    the concrete gap. Cite file and line when the evidence has a location.
 4. Never restate a finding as more certain than its state. `UNVERIFIED` means
    unproven, not failing.
 5. If no report exists, say so and suggest completing a spec task or running
-   `npx spectruth post-task`.
+   the post-task audit.
 
 ## Repair previews require explicit approval
 
@@ -69,8 +75,8 @@ When the user asks how to fix a blocked finding:
 4. Only after the user approves in that separate turn may you implement the
    approved scope, and nothing beyond it.
 5. Never modify `tasks.md`, and never mark a task complete.
-6. After an approved repair, re-run `npx spectruth post-task` so the claim is
-   re-audited rather than assumed fixed.
+6. After an approved repair, re-run `node packages/cli/dist/index.js post-task`
+   so the claim is re-audited rather than assumed fixed.
 
 If the user has not approved, the correct action is to stop and wait.
 

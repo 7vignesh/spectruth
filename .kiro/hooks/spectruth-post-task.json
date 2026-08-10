@@ -6,7 +6,7 @@
       "trigger": "PostTaskExec",
       "action": {
         "type": "command",
-        "command": "npx spectruth post-task"
+        "command": "node packages/cli/dist/index.js post-task"
       },
       "timeout": 60
     }

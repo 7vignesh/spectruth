@@ -6,7 +6,7 @@ triggers and their payload shape is not documented.
 
 ## Setup
 
-1. Build the workspace so `spectruth` resolves:
+1. Build the workspace, because the hooks run the built CLI entry point:
    ```powershell
    cd packages\core; npx tsc
    cd ..\cli; npx tsc
@@ -14,11 +14,16 @@ triggers and their payload shape is not documented.
 2. Confirm the paired hooks are present:
    - `.kiro/hooks/spectruth-pre-task.json` (`PreTaskExec`)
    - `.kiro/hooks/spectruth-post-task.json` (`PostTaskExec`)
-3. Open the project in the Kiro IDE and reload so hooks and the skill load.
+3. Confirm the command runs from the project root:
+   ```powershell
+   node packages/cli/dist/index.js pre-task
+   ```
+4. Open the project in the Kiro IDE and reload so hooks and the skill load.
 
-If `npx spectruth` does not resolve inside the IDE, temporarily change the hook
-commands to `node packages/cli/dist/index.js pre-task` / `... post-task` and
-record that as a finding.
+The hooks intentionally call `node packages/cli/dist/index.js` rather than
+`npx spectruth`, because the package is not installed or published yet and
+`npx spectruth` fails with "could not determine executable to run". Packaging
+moves this to `npx spectruth` on Day 5.
 
 ## Checks
 
