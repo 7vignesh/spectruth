@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "SpecTruth Pre-Task Snapshot",
+      "trigger": "PreTaskExec",
+      "action": {
+        "type": "command",
+        "command": "npx spectruth pre-task"
+      },
+      "timeout": 30
+    }
+  ]
+}

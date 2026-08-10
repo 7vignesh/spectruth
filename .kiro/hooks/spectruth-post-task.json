@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "SpecTruth Post-Task Audit",
+      "trigger": "PostTaskExec",
+      "action": {
+        "type": "command",
+        "command": "npx spectruth post-task"
+      },
+      "timeout": 60
+    }
+  ]
+}
