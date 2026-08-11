@@ -26,6 +26,7 @@ import { adjudicateBundle } from '../evidence/adjudicate.js';
 import { buildTaskAuditReport } from './task-report.js';
 import { readReportForTask, saveReport } from '../report/store.js';
 import { createProvider } from '../verifier/provider.js';
+import { findSpecDirs, SPECS_DIR } from '../hooks/spec-discovery.js';
 
 export interface AuditOptions {
   projectRoot: string;
@@ -79,6 +80,7 @@ export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
       transition,
       criteria,
       codebasePath: codePath,
+      adjudication: provider ? 'llm-assisted' : 'deterministic',
       ...(options.now ? { now: options.now } : {}),
     });
     const saved = saveReport(options.projectRoot, spec.name, report);
@@ -101,6 +103,78 @@ export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
   }
 
   return { spec, outcomes, unlinkedTaskIds };
+}
+
+export interface ProjectAuditOptions extends Omit<AuditOptions, 'specDir'> {
+  /** Audit one spec. When omitted, every spec in the project is audited. */
+  specDir?: string;
+}
+
+export interface SkippedSpec {
+  specDir: string;
+  reason: string;
+}
+
+export interface ProjectAuditResult {
+  runs: AuditRunResult[];
+  skipped: SkippedSpec[];
+}
+
+/**
+ * Audit the whole project.
+ *
+ * An explicit user request should not fail merely because a repository holds
+ * several specs, so every spec is audited when none is named. The stricter
+ * refuse-to-guess rule stays on the hook path, where auditing the wrong task
+ * would attach evidence to a claim it does not belong to.
+ */
+export async function auditProject(options: ProjectAuditOptions): Promise<ProjectAuditResult> {
+  const specDirs = options.specDir
+    ? [options.specDir]
+    : findSpecDirs(options.projectRoot);
+
+  if (specDirs.length === 0) {
+    throw new SpecTruthError(
+      `No Kiro specs found under ${SPECS_DIR}`,
+      'SPEC_DIR_NOT_FOUND',
+      'Open the project that contains .kiro/specs, or pass --spec explicitly.',
+    );
+  }
+
+  const runs: AuditRunResult[] = [];
+  const skipped: SkippedSpec[] = [];
+
+  for (const specDir of specDirs) {
+    try {
+      runs.push(await runAudit({ ...options, specDir }));
+    } catch (error) {
+      if (isSkippable(error)) {
+        skipped.push({ specDir, reason: (error as SpecTruthError).message });
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (runs.length === 0) {
+    throw new SpecTruthError(
+      options.taskId
+        ? `Task ${options.taskId} is not a completed task in any spec.`
+        : 'No completed tasks were found in any spec, so there is no completion claim to audit.',
+      'NO_COMPLETED_TASKS',
+      'Mark a task complete in a spec, then audit again.',
+    );
+  }
+
+  return { runs, skipped };
+}
+
+/** A spec with nothing to audit is skipped; anything else is a real failure. */
+function isSkippable(error: unknown): boolean {
+  return error instanceof SpecTruthError
+    && (error.code === 'NO_COMPLETED_TASKS'
+      || error.code === 'TASK_NOT_FOUND'
+      || error.code === 'TASKS_NOT_FOUND');
 }
 
 function selectTasks(spec: KiroSpec, taskId?: string): ParsedTask[] {

@@ -18,12 +18,11 @@
 import { Command } from 'commander';
 import {
   approveRepair,
+  auditProject,
   buildRepairPreviews,
   formatHookSummary,
   readLatestReport,
   readPreviews,
-  resolveSingleSpecDir,
-  runAudit,
   runPostTaskHook,
   runPreTaskHook,
   savePreviews,
@@ -154,52 +153,56 @@ program
     json?: boolean;
   }) => {
     try {
-      const specDir = options.spec ?? resolveSingleSpecDir(options.root);
-      const run = await runAudit({
+      const result = await auditProject({
         projectRoot: options.root,
-        specDir,
+        ...(options.spec ? { specDir: options.spec } : {}),
         ...(options.code ? { codePath: options.code } : {}),
         ...(options.task ? { taskId: options.task } : {}),
         ...(options.deterministic ? { deterministicOnly: true } : {}),
       });
 
-      // Previews are generated alongside the audit but change nothing.
-      const previewsByReport = run.outcomes.map(outcome => {
-        const previews = buildRepairPreviews(outcome.report);
-        if (previews.length > 0) {
-          savePreviews(options.root, outcome.report.reportId, previews);
+      // Previews are recorded alongside the audit but change nothing.
+      const sections: string[] = [];
+      const jsonPayload: unknown[] = [];
+
+      for (const run of result.runs) {
+        for (const outcome of run.outcomes) {
+          const previews = buildRepairPreviews(outcome.report);
+          if (previews.length > 0) {
+            savePreviews(options.root, outcome.report.reportId, previews);
+          }
+
+          if (options.json) {
+            jsonPayload.push({
+              spec: run.spec.name,
+              report: outcome.report,
+              previews,
+            });
+          } else {
+            sections.push(formatHookSummary(outcome.report, {
+              reportPath: outcome.reportPath,
+              previewIds: previews.map(preview => preview.previewId),
+            }));
+          }
         }
-        return { reportId: outcome.report.reportId, previews };
-      });
+
+        if (!options.json && run.unlinkedTaskIds.length > 0) {
+          sections.push(
+            `Skipped in ${run.spec.name}: task(s) ${run.unlinkedTaskIds.join(', ')} reference no requirement, so nothing could be audited.`,
+          );
+        }
+      }
 
       if (options.json) {
         process.stdout.write(`${JSON.stringify({
-          spec: run.spec.name,
-          reports: run.outcomes.map(outcome => outcome.report),
-          previews: previewsByReport,
-          unlinkedTaskIds: run.unlinkedTaskIds,
+          audits: jsonPayload,
+          skippedSpecs: result.skipped,
+          unlinkedTasks: result.runs.flatMap(run =>
+            run.unlinkedTaskIds.map(taskId => ({ spec: run.spec.name, taskId })),
+          ),
         }, null, 2)}\n`);
       } else {
-        const sections = run.outcomes.map(outcome => {
-          const previews = previewsByReport
-            .find(entry => entry.reportId === outcome.report.reportId)?.previews ?? [];
-          return [
-            formatHookSummary(outcome.report, { reportPath: outcome.reportPath }),
-            ...previews.map(preview =>
-              `Repair preview ${preview.previewId} for ${preview.criterionId}: ${preview.proposedChange}`,
-            ),
-            previews.length > 0
-              ? 'Nothing has been changed. Approve a preview id to authorize that repair.'
-              : '',
-          ].filter(Boolean).join('\n');
-        });
-
-        if (run.unlinkedTaskIds.length > 0) {
-          sections.push(
-            `Skipped tasks with no requirement reference: ${run.unlinkedTaskIds.join(', ')}`,
-          );
-        }
-        process.stdout.write(`${sections.join('\n\n')}\n`);
+        process.stdout.write(`${sections.join('\n\n' + '─'.repeat(72) + '\n\n')}\n`);
       }
 
       process.exit(0);

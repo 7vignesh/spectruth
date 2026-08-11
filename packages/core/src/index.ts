@@ -56,8 +56,15 @@ export {
 } from './audit/task-report.js';
 export type { BuildTaskAuditReportInput } from './audit/task-report.js';
 export { computeReportId } from './audit/identity.js';
-export { runAudit, synthesizeTransition } from './audit/run.js';
-export type { AuditOptions, AuditRunResult, TaskAuditOutcome } from './audit/run.js';
+export { runAudit, auditProject, synthesizeTransition } from './audit/run.js';
+export type {
+  AuditOptions,
+  AuditRunResult,
+  ProjectAuditOptions,
+  ProjectAuditResult,
+  SkippedSpec,
+  TaskAuditOutcome,
+} from './audit/run.js';
 
 export {
   PREVIEW_DIR,

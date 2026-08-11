@@ -93,13 +93,14 @@ export async function runPostTaskHook(options: HookOptions): Promise<HookResult>
 
     // Collect and adjudicate real evidence when possible
     let auditedCriteria: CriterionAudit[];
+    let provider: ReturnType<typeof resolveOptionalProvider>;
     if (criteria.length > 0) {
       const bundle = await buildEvidenceBundle({
         spec: result.spec,
         transition,
         codebasePath: codePath,
       });
-      const provider = resolveOptionalProvider();
+      provider = resolveOptionalProvider();
       auditedCriteria = await adjudicateBundle({ bundle, provider });
     } else {
       auditedCriteria = [];
@@ -110,6 +111,7 @@ export async function runPostTaskHook(options: HookOptions): Promise<HookResult>
       transition,
       criteria: auditedCriteria,
       codebasePath: codePath,
+      adjudication: provider ? 'llm-assisted' : 'deterministic',
       ...(options.now ? { now: options.now } : {}),
     });
 
