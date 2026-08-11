@@ -1,10 +1,25 @@
 {
-  "name": "@spectruth/web",
+  "name": "spectruth-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Web UI for SpecTruth — visual spec conformance reports",
+  "description": "Landing page for SpecTruth",
+  "type": "module",
   "scripts": {
-    "dev": "echo 'Web UI setup pending — coming Day 6'",
-    "build": "echo 'Web UI setup pending — coming Day 6'"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "5.7.2",
+    "vite": "^8.2.1"
   }
 }

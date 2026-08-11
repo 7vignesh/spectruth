@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SpecTruth — the agent said it's done. Is it?</title>
+    <meta
+      name="description"
+      content="When an agent marks a spec task complete, that is a claim. SpecTruth audits the claim against the acceptance criteria and blocks the ship when the evidence does not support it."
+    />
+    <meta property="og:title" content="SpecTruth — Done Integrity for Kiro" />
+    <meta
+      property="og:description"
+      content="The agent says the task is done. SpecTruth decides whether the evidence agrees."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Applied before first paint so a light-mode reader never sees a dark flash.
+      (function () {
+        try {
+          var stored = localStorage.getItem('spectruth-theme');
+          var prefersLight =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+          var theme = stored || (prefersLight ? 'light' : 'dark');
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
