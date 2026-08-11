@@ -1,54 +1,69 @@
 # SpecTruth — Requirements
 
 ## Introduction
-SpecTruth is a spec conformance verifier that independently checks whether AI-generated code satisfies the requirements defined in a Kiro spec. It parses structured specs, analyzes codebases, and produces pass/fail reports with evidence.
+
+SpecTruth is a Done Integrity ship gate for spec-driven agentic development. When
+an agent marks a spec task complete, that is a claim. SpecTruth audits the claim
+against the acceptance criteria the task references and produces a ship decision
+backed by evidence.
+
+It is not a code reviewer and not a test runner. Its input is the completion
+claim, which is why it can detect work that was never done rather than only work
+that was done badly.
 
 ## Requirements
 
 ### Requirement 1
-**User Story:** As a developer using Kiro, I want SpecTruth to automatically verify my spec after a task completes, so that I know immediately if requirements were missed without manual review.
+**User Story:** As a developer who delegates tasks to an agent, I want the tool to know which task was completed, so that evidence is attributed to the right claim.
 
 #### Acceptance Criteria
-1. WHEN a Kiro spec task completes THEN SpecTruth SHALL automatically trigger via PostTaskExec hook
-2. WHEN SpecTruth runs THEN it SHALL parse the spec's requirements.md and extract all acceptance criteria
-3. WHEN verification completes THEN SpecTruth SHALL output a pass/fail report to the terminal
-4. IF no LLM provider is configured THEN SpecTruth SHALL display a clear error with setup instructions
+1. WHEN a task changes from an incomplete state to complete between two snapshots THEN the system SHALL identify exactly that one task as the audited claim
+2. IF more than one task completed between snapshots THEN the system SHALL refuse to audit and report the candidates rather than attributing evidence to a guessed task
+3. WHEN a user asks whether work is done THEN the system SHALL audit the tasks currently marked complete without requiring a prior snapshot
+4. WHEN no completed task exists in a spec THEN the system SHALL report that there is no completion claim to audit
+5. WHERE a task was identified from current state rather than an observed transition THEN the system SHALL record that distinction in the evidence
 
 ### Requirement 2
-**User Story:** As a developer, I want SpecTruth to verify each acceptance criterion independently against my codebase, so that I get granular feedback on what's implemented and what's missing.
+**User Story:** As a developer, I want each acceptance criterion judged against real evidence, so that a verdict can be traced to something concrete.
 
 #### Acceptance Criteria
-1. WHEN given a spec with multiple requirements THEN SpecTruth SHALL verify each acceptance criterion separately
-2. WHEN verifying a criterion THEN SpecTruth SHALL search the codebase for relevant code snippets
-3. WHEN relevant code is found THEN SpecTruth SHALL send the criterion + code to an LLM for judgment
-4. WHEN the LLM responds THEN SpecTruth SHALL return a verdict of PASS, FAIL, or PARTIAL with evidence
-5. IF no relevant code is found for a criterion THEN SpecTruth SHALL report FAIL with "No implementation evidence found"
+1. WHEN auditing a completed task THEN the system SHALL resolve the acceptance criteria that the task references and audit only those
+2. WHEN adjudicating a criterion THEN the system SHALL collect evidence from the task transition, changed files, source code, and deterministic static checks
+3. IF documentation describes required behavior THEN the system SHALL NOT cite that documentation as evidence that the behavior is implemented
+4. WHEN a finding is produced THEN it SHALL carry exactly one of SUPPORTED, PARTIAL, UNSUPPORTED, or UNVERIFIED together with a non-empty justification
+5. IF no implementation evidence is found for a criterion THEN the system SHALL report UNSUPPORTED rather than assuming the work was done
+6. WHEN a task references no requirement THEN the system SHALL report it as skipped rather than implying it passed
 
 ### Requirement 3
-**User Story:** As a developer not using Kiro, I want to run SpecTruth as a standalone CLI tool with my own API key, so that I can verify specs regardless of my IDE.
+**User Story:** As an engineer deciding whether to ship, I want a decision rather than a score, so that I know what action to take.
 
 #### Acceptance Criteria
-1. WHEN a user runs `spectruth verify --spec <path> --code <path>` THEN the tool SHALL verify and report results
-2. WHEN ANTHROPIC_API_KEY is set in environment THEN SpecTruth SHALL use the Anthropic provider
-3. WHEN OPENAI_API_KEY is set in environment THEN SpecTruth SHALL use the OpenAI provider
-4. WHEN neither key is available and not in Kiro THEN SpecTruth SHALL exit with a helpful error message
-5. WHEN --output json flag is provided THEN SpecTruth SHALL output structured JSON instead of terminal colors
+1. WHEN any criterion is UNSUPPORTED or PARTIAL THEN the ship decision SHALL be BLOCKED
+2. WHEN no criterion blocks and at least one is UNVERIFIED THEN the ship decision SHALL be REVIEW_REQUIRED
+3. WHEN every audited criterion is SUPPORTED THEN the ship decision SHALL be READY
+4. IF a security-sensitive criterion lacks complete enforcement evidence THEN the system SHALL report UNSUPPORTED and block the ship
+5. WHEN no model provider is configured THEN the system SHALL still produce a verdict from static evidence alone and state that no model was used
+6. WHERE a verdict is reported THEN the system SHALL NOT include confidence values, fidelity percentages, or completion scores
 
 ### Requirement 4
-**User Story:** As a developer, I want SpecTruth to produce clear, actionable reports that show exactly what passed and what failed with evidence, so that I can quickly fix missing implementations.
+**User Story:** As a developer, I want repairs proposed rather than performed, so that nothing changes without my explicit consent.
 
 #### Acceptance Criteria
-1. WHEN verification completes THEN the report SHALL show an overall score (e.g., "8/11 criteria satisfied")
-2. WHEN a criterion passes THEN the report SHALL show the file and line number as evidence
-3. WHEN a criterion fails THEN the report SHALL explain what's missing and suggest what to implement
-4. WHEN a criterion is partially met THEN the report SHALL explain what's done and what's remaining
-5. WHEN the CLI runs THEN it SHALL exit with code 0 on full pass and code 1 on any failure
+1. WHEN a finding is not SUPPORTED THEN the system SHALL offer a repair preview describing the gap, the proposed change, and the evidence expected afterwards
+2. WHEN a repair preview is generated THEN the working tree SHALL remain unchanged
+3. IF a repair is attempted without a recorded approval THEN the system SHALL refuse it
+4. WHEN approval is granted THEN it SHALL be bound to one preview, one report, and the contents of the files it would touch
+5. IF the report findings or the covered files change after approval THEN the system SHALL refuse the stale approval and require a new one
+6. WHEN an approved repair has been applied THEN the system SHALL re-audit and report whether that specific gap closed
+7. WHERE any repair is authorized THEN the system SHALL NOT modify tasks.md or mark a task complete
 
 ### Requirement 5
-**User Story:** As a developer, I want to add SpecTruth to any project with a single command, so that setup is frictionless.
+**User Story:** As a Kiro user, I want to ask the agent whether work is done, so that auditing needs no separate tool or manual command.
 
 #### Acceptance Criteria
-1. WHEN a user runs `spectruth init` THEN the tool SHALL create .kiro/hooks/spectruth-verify.json in the project
-2. WHEN a user runs `spectruth init` THEN the tool SHALL create .kiro/agents/spectruth.json in the project
-3. WHEN the hook file is created THEN it SHALL be configured with PostTaskExec trigger
-4. WHEN init completes THEN the tool SHALL display a success message with usage instructions
+1. WHEN a user asks the agent whether a task is complete THEN the agent SHALL run the audit and explain the ship decision, the required behavior, what was found, and what is missing
+2. WHEN the audit runs as a task hook THEN a BLOCKED decision SHALL exit zero so that the summary reaches the agent's context
+3. IF an operational failure occurs, such as an unreadable spec or a missing snapshot THEN the system SHALL exit non-zero
+4. WHEN a user runs init THEN the system SHALL scaffold the agent skill, custom agent, and paired task hooks into the project
+5. WHEN a user runs demo THEN the system SHALL demonstrate the full audit and repair loop without requiring a spec, an API key, or network access
+6. WHEN a user runs the tool with no arguments THEN it SHALL audit the current project without needing a subcommand

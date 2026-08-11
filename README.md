@@ -333,6 +333,33 @@ project being audited.
 - **Tasks must reference requirements.** A task with no `_Requirements:_` footer
   has nothing to audit against, and is reported as skipped rather than passed.
 
+### What happens when it audits itself
+
+Running SpecTruth on this repository returns `UNVERIFIED` for almost every
+criterion, and therefore `REVIEW_REQUIRED`:
+
+```text
+Task 4  Evidence-backed domain model   ← marked complete
+  REQ-3-AC-1   UNVERIFIED
+    required  WHEN any criterion is UNSUPPORTED or PARTIAL THEN the ship
+              decision SHALL be BLOCKED
+```
+
+That is the correct answer, and it is worth understanding why.
+
+These criteria describe internal behaviour — how states aggregate, when a
+decision blocks. Static analysis can detect a missing HTTP 403; it cannot prove
+that a policy function returns the right decision. The evidence that *does* prove
+it is the test suite, and SpecTruth does not yet ingest test output — that
+adapter is deliberately out of scope for this version.
+
+So the honest verdict on its own code is *unproven*, not *passing*. A tool that
+scored itself highly here would be telling you something it cannot know. The
+existence of `UNVERIFIED` is what makes that answer expressible at all.
+
+For a demonstration where the deterministic checks do apply, use
+`npx spectruth demo` or the bundled `examples/records-api`.
+
 ---
 
 ## Built with Kiro
