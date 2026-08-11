@@ -140,6 +140,34 @@ describe('runStaticChecks', () => {
     expect(statusCheck?.detail).toContain('409');
   });
 
+  /**
+   * Reporting cites the first supporting evidence, so the check that names the
+   * required behaviour must come before the one that merely proves a route
+   * exists. Otherwise a repaired criterion cites the route instead of the fix.
+   */
+  it('orders the status code check ahead of the route check', () => {
+    const criterion: AcceptanceCriterion = {
+      id: 'REQ-1-AC-1',
+      text: 'WHEN a user cannot delete a record THEN the system SHALL return 403',
+      keyword: 'WHEN/THEN',
+    };
+    const snippets: CodeSnippet[] = [{
+      filePath: 'src/records.ts',
+      content: "router.delete('/records/:id', (req, res) => res.status(403).send());",
+      startLine: 1,
+      endLine: 1,
+      language: 'typescript',
+    }];
+
+    const results = runStaticChecks(criterion, snippets, '.');
+    const statusIndex = results.findIndex(result => result.type === 'pattern');
+    const routeIndex = results.findIndex(result => result.type === 'route');
+
+    expect(statusIndex).toBeGreaterThanOrEqual(0);
+    expect(routeIndex).toBeGreaterThanOrEqual(0);
+    expect(statusIndex).toBeLessThan(routeIndex);
+  });
+
   it('returns no checks for a vague criterion', () => {
     const criterion: AcceptanceCriterion = {
       id: 'REQ-1-AC-1',

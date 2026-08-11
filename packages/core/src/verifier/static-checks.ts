@@ -36,13 +36,14 @@ export function runStaticChecks(
   const results: StaticCheckResult[] = [];
   const text = criterion.text.toLowerCase();
 
-  // Check for route/endpoint mentions
-  const routeCheck = checkRouteExistence(text, snippets);
-  if (routeCheck) results.push(routeCheck);
-
-  // Check for status code usage
+  // Ordered from most to least specific to the criterion. Reporting cites the
+  // first supporting evidence it finds, and a status code names the behaviour
+  // being required far more precisely than the presence of a route does.
   const statusCheck = checkStatusCode(criterion.text, snippets);
   if (statusCheck) results.push(statusCheck);
+
+  const routeCheck = checkRouteExistence(text, snippets);
+  if (routeCheck) results.push(routeCheck);
 
   // Check for dependency mentions
   const depCheck = checkDependency(text, codebasePath);
