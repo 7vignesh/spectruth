@@ -1,15 +1,15 @@
 {
-  "name": "spectruth",
+  "name": "spectruth-workspace",
   "version": "0.1.0",
   "private": true,
-  "description": "Spec conformance verifier — independently checks if AI-generated code satisfies your Kiro specs",
+  "description": "Monorepo for SpecTruth — Done Integrity ship gate for Kiro spec tasks",
   "author": "7vignesh",
   "license": "MIT",
   "scripts": {
-    "build": "pnpm -r build",
-    "dev": "pnpm -r dev",
-    "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
+    "build": "pnpm --filter spectruth-core build && pnpm --filter spectruth build",
+    "test": "pnpm --filter spectruth-core test",
+    "demo": "node packages/cli/dist/index.js demo",
+    "audit:example": "node packages/cli/dist/index.js audit --root examples/records-api",
     "clean": "pnpm -r clean"
   },
   "engines": {
