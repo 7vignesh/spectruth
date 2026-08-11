@@ -109,6 +109,11 @@ export {
 } from './report/store.js';
 export type { SavedReport } from './report/store.js';
 
+export { runDemo, formatDemo } from './demo/index.js';
+export type { DemoOptions, DemoResult, DemoStep } from './demo/index.js';
+export { runInit, formatInitResult } from './init/index.js';
+export type { InitOptions, InitResult, ScaffoldFile } from './init/index.js';
+
 export { runPreTaskHook, runPostTaskHook } from './hooks/index.js';
 export type { HookOptions, HookResult } from './hooks/index.js';
 
