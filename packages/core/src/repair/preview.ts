@@ -65,25 +65,27 @@ export function computePreviewId(reportId: string, criterionId: string): string 
 /**
  * Describe the repair in terms of the criterion and the missing evidence.
  * An UNVERIFIED finding asks for proof rather than assuming code is absent.
+ *
+ * The gap is carried on its own field, so it is not repeated here.
  */
 function proposeChange(criterion: CriterionAudit, gap: string): string {
   const subject = criterion.criterionText.replace(/\s+/g, ' ').trim();
 
   if (criterion.state === 'UNVERIFIED') {
     return `Establish observable evidence that this behavior holds: ${subject}. `
-      + `The implementation may already exist, so prefer adding proof over rewriting code. Gap: ${gap}`;
+      + 'The implementation may already exist, so prefer adding proof over rewriting code.';
   }
 
   if (isSecuritySensitiveCriterion(criterion.criterionText)) {
     return `Add the missing enforcement so the system satisfies: ${subject}. `
-      + `Reject unauthorized access explicitly rather than relying on callers. Gap: ${gap}`;
+      + 'Reject unauthorized access explicitly rather than relying on callers.';
   }
 
   if (criterion.state === 'PARTIAL') {
-    return `Complete the remaining behavior for: ${subject}. Gap: ${gap}`;
+    return `Complete the remaining behavior for: ${subject}`;
   }
 
-  return `Implement: ${subject}. Gap: ${gap}`;
+  return `Implement: ${subject}`;
 }
 
 function likelyFilesFor(criterion: CriterionAudit): string[] {

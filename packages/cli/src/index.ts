@@ -20,15 +20,19 @@ import {
   approveRepair,
   auditProject,
   buildRepairPreviews,
+  formatDemo,
   formatHookSummary,
+  formatInitResult,
   readLatestReport,
   readPreviews,
+  runDemo,
+  runInit,
   runPostTaskHook,
   runPreTaskHook,
   savePreviews,
   SpecTruthError,
   type HookResult,
-} from '@spectruth/core';
+} from 'spectruth-core';
 
 const program = new Command();
 
@@ -131,80 +135,117 @@ program
 
 // ─── Agent-facing commands ───────────────────────────────────────────────────
 
+interface AuditCommandOptions {
+  spec?: string;
+  task?: string;
+  code?: string;
+  root: string;
+  deterministic?: boolean;
+  json?: boolean;
+}
+
 /**
- * The primary entry point. A Kiro agent runs this when a user asks whether the
- * work is actually done, so it must need no prior snapshot.
+ * The primary action. Runs for `spectruth audit` and for a bare `spectruth`,
+ * so a first-time user needs no subcommand at all.
  */
+async function executeAudit(options: AuditCommandOptions): Promise<never> {
+  try {
+    const result = await auditProject({
+      projectRoot: options.root,
+      ...(options.spec ? { specDir: options.spec } : {}),
+      ...(options.code ? { codePath: options.code } : {}),
+      ...(options.task ? { taskId: options.task } : {}),
+      ...(options.deterministic ? { deterministicOnly: true } : {}),
+    });
+
+    const sections: string[] = [];
+    const jsonPayload: unknown[] = [];
+
+    for (const run of result.runs) {
+      for (const outcome of run.outcomes) {
+        // Previews are recorded alongside the audit but change nothing.
+        const previews = buildRepairPreviews(outcome.report);
+        if (previews.length > 0) {
+          savePreviews(options.root, outcome.report.reportId, previews);
+        }
+
+        if (options.json) {
+          jsonPayload.push({ spec: run.spec.name, report: outcome.report, previews });
+        } else {
+          sections.push(formatHookSummary(outcome.report, {
+            reportPath: outcome.reportPath,
+            previewIds: previews.map(preview => preview.previewId),
+          }));
+        }
+      }
+
+      if (!options.json && run.unlinkedTaskIds.length > 0) {
+        sections.push(
+          `Skipped in ${run.spec.name}: task(s) ${run.unlinkedTaskIds.join(', ')} reference no requirement, so nothing could be audited.`,
+        );
+      }
+    }
+
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify({
+        audits: jsonPayload,
+        skippedSpecs: result.skipped,
+        unlinkedTasks: result.runs.flatMap(run =>
+          run.unlinkedTaskIds.map(taskId => ({ spec: run.spec.name, taskId })),
+        ),
+      }, null, 2)}\n`);
+    } else {
+      process.stdout.write(`${sections.join(`\n\n${'─'.repeat(72)}\n\n`)}\n`);
+    }
+
+    process.exit(0);
+  } catch (error) {
+    fail(error);
+  }
+}
+
+function auditOptions(command: Command): Command {
+  return command
+    .option('--spec <path>', 'Kiro spec directory (all specs are audited when omitted)')
+    .option('--task <id>', 'Audit one task instead of every completed task')
+    .option('--code <path>', 'Codebase root (defaults to the project root)')
+    .option('--root <path>', 'Project root for reports and previews', process.cwd())
+    .option('--deterministic', 'Skip LLM adjudication and use static evidence only')
+    .option('--json', 'Emit structured JSON for an agent to consume');
+}
+
+auditOptions(
+  program
+    .command('audit', { isDefault: true })
+    .description('Audit the completion claims of tasks that are marked complete'),
+).action(executeAudit);
+
 program
-  .command('audit')
-  .description('Audit the completion claims of tasks that are marked complete')
-  .option('--spec <path>', 'Kiro spec directory (auto-detected when omitted)')
-  .option('--task <id>', 'Audit one task instead of every completed task')
-  .option('--code <path>', 'Codebase root (defaults to the project root)')
-  .option('--root <path>', 'Project root for reports and previews', process.cwd())
-  .option('--deterministic', 'Skip LLM adjudication and use deterministic evidence only')
-  .option('--json', 'Emit structured JSON for an agent to consume')
-  .action(async (options: {
-    spec?: string;
-    task?: string;
-    code?: string;
-    root: string;
-    deterministic?: boolean;
-    json?: boolean;
-  }) => {
+  .command('demo')
+  .description('Run a self-contained demonstration; needs no spec, key, or network')
+  .option('--keep', 'Leave the scratch project on disk for inspection')
+  .action(async (options: { keep?: boolean }) => {
     try {
-      const result = await auditProject({
+      const result = await runDemo(options.keep ? { keepFiles: true } : {});
+      process.stdout.write(formatDemo(result));
+      process.exit(0);
+    } catch (error) {
+      fail(error);
+    }
+  });
+
+program
+  .command('init')
+  .description('Install the Kiro integration into this project')
+  .option('--root <path>', 'Project root to scaffold into', process.cwd())
+  .option('--force', 'Replace files that already exist')
+  .action((options: { root: string; force?: boolean }) => {
+    try {
+      const result = runInit({
         projectRoot: options.root,
-        ...(options.spec ? { specDir: options.spec } : {}),
-        ...(options.code ? { codePath: options.code } : {}),
-        ...(options.task ? { taskId: options.task } : {}),
-        ...(options.deterministic ? { deterministicOnly: true } : {}),
+        ...(options.force ? { force: true } : {}),
       });
-
-      // Previews are recorded alongside the audit but change nothing.
-      const sections: string[] = [];
-      const jsonPayload: unknown[] = [];
-
-      for (const run of result.runs) {
-        for (const outcome of run.outcomes) {
-          const previews = buildRepairPreviews(outcome.report);
-          if (previews.length > 0) {
-            savePreviews(options.root, outcome.report.reportId, previews);
-          }
-
-          if (options.json) {
-            jsonPayload.push({
-              spec: run.spec.name,
-              report: outcome.report,
-              previews,
-            });
-          } else {
-            sections.push(formatHookSummary(outcome.report, {
-              reportPath: outcome.reportPath,
-              previewIds: previews.map(preview => preview.previewId),
-            }));
-          }
-        }
-
-        if (!options.json && run.unlinkedTaskIds.length > 0) {
-          sections.push(
-            `Skipped in ${run.spec.name}: task(s) ${run.unlinkedTaskIds.join(', ')} reference no requirement, so nothing could be audited.`,
-          );
-        }
-      }
-
-      if (options.json) {
-        process.stdout.write(`${JSON.stringify({
-          audits: jsonPayload,
-          skippedSpecs: result.skipped,
-          unlinkedTasks: result.runs.flatMap(run =>
-            run.unlinkedTaskIds.map(taskId => ({ spec: run.spec.name, taskId })),
-          ),
-        }, null, 2)}\n`);
-      } else {
-        process.stdout.write(`${sections.join('\n\n' + '─'.repeat(72) + '\n\n')}\n`);
-      }
-
+      process.stdout.write(formatInitResult(result));
       process.exit(0);
     } catch (error) {
       fail(error);

@@ -137,7 +137,7 @@ export async function auditProject(options: ProjectAuditOptions): Promise<Projec
     throw new SpecTruthError(
       `No Kiro specs found under ${SPECS_DIR}`,
       'SPEC_DIR_NOT_FOUND',
-      'Open the project that contains .kiro/specs, or pass --spec explicitly.',
+      'Open the project that contains .kiro/specs, or run `npx spectruth demo` to see a worked example.',
     );
   }
 
@@ -162,7 +162,7 @@ export async function auditProject(options: ProjectAuditOptions): Promise<Projec
         ? `Task ${options.taskId} is not a completed task in any spec.`
         : 'No completed tasks were found in any spec, so there is no completion claim to audit.',
       'NO_COMPLETED_TASKS',
-      'Mark a task complete in a spec, then audit again.',
+      'Mark a task complete, or run `npx spectruth demo` to see a worked example.',
     );
   }
 
