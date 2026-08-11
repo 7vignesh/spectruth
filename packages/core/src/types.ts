@@ -119,6 +119,15 @@ export interface TaskAuditScope {
   taskTitle?: string;
 }
 
+/**
+ * How the findings were reached.
+ *
+ * `deterministic` means static evidence alone produced the verdict, so it is
+ * reproducible with no model and no API key. `llm-assisted` means a provider
+ * adjudicated within the bounded evidence bundle.
+ */
+export type AdjudicationMode = 'deterministic' | 'llm-assisted';
+
 export interface SpecAuditReport {
   reportId: string;
   scope: SpecAuditScope;
@@ -127,6 +136,7 @@ export interface SpecAuditReport {
   codebasePath: string;
   requirements: RequirementAudit[];
   summary: AuditSummary;
+  adjudication?: AdjudicationMode;
 }
 
 export interface TaskAuditReport {
@@ -137,6 +147,7 @@ export interface TaskAuditReport {
   codebasePath: string;
   requirements: RequirementAudit[];
   summary: AuditSummary;
+  adjudication?: AdjudicationMode;
 }
 
 export type AuditReport = SpecAuditReport | TaskAuditReport;

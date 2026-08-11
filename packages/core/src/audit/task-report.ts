@@ -8,6 +8,7 @@
 
 import type {
   AcceptanceCriterion,
+  AdjudicationMode,
   CompletedTaskTransition,
   CriterionAudit,
   KiroSpec,
@@ -23,6 +24,8 @@ export interface BuildTaskAuditReportInput {
   transition: CompletedTaskTransition;
   criteria: CriterionAudit[];
   codebasePath: string;
+  /** Whether a provider adjudicated, or static evidence alone decided. */
+  adjudication?: AdjudicationMode;
   now?: () => Date;
 }
 
@@ -74,6 +77,7 @@ export function buildTaskAuditReport(input: BuildTaskAuditReportInput): TaskAudi
     codebasePath,
     requirements,
     summary,
+    adjudication: input.adjudication ?? 'deterministic',
   };
 }
 
