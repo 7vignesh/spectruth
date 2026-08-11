@@ -1,7 +1,7 @@
 {
-  "name": "@spectruth/core",
+  "name": "spectruth-core",
   "version": "0.1.0",
-  "description": "Core verification engine for SpecTruth",
+  "description": "Done Integrity engine — audits whether a completed spec task is actually supported by evidence",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,20 +11,51 @@
       "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "license": "MIT",
+  "author": "7vignesh",
+  "homepage": "https://github.com/7vignesh/spectruth",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/7vignesh/spectruth.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "kiro",
+    "spec-driven-development",
+    "verification",
+    "ai-agents",
+    "done-integrity"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "tsc"
   },
-  "dependencies": {
-    "@anthropic-ai/sdk": "0.39.0",
-    "openai": "4.78.0",
-    "glob": "11.0.0",
-    "ignore": "6.0.2"
+  "peerDependencies": {
+    "@anthropic-ai/sdk": ">=0.39.0",
+    "openai": ">=4.78.0"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.39.0",
+    "openai": "4.78.0",
     "typescript": "5.7.2",
     "vitest": "2.1.8",
     "@types/node": "22.10.2"
