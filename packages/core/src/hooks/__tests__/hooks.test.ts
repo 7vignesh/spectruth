@@ -141,10 +141,10 @@ describe('runPostTaskHook', () => {
       taskId: '2',
       taskTitle: 'Enforce record ownership',
     });
-    expect(result.stdout).toContain('Completed task 2');
+    expect(result.stdout).toContain('Task 2');
     // The linked criterion demands a 403 for a non-owner, and no enforcement
     // exists, so the security rule blocks the claim.
-    expect(result.stdout).toContain('Ship decision: BLOCKED');
+    expect(result.stdout).toContain('SHIP DECISION  BLOCKED');
   });
 
   it('reports only the criteria linked to the completed task', async () => {
@@ -178,8 +178,8 @@ describe('runPostTaskHook', () => {
 
     const result = await runPostTaskHook({ projectRoot: root });
     expect(result.report!.requirements[0].criteria[0].repairPreviewAvailable).toBe(true);
-    expect(result.stdout).toContain('repair preview is available');
-    expect(result.stdout).toContain('change nothing until you approve');
+    expect(result.stdout).toContain('A repair preview is available.');
+    expect(result.stdout).toContain('Nothing has been changed.');
   });
 
   it('carries transition and static evidence for the finding', async () => {

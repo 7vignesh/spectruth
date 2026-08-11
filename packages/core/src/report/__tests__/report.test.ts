@@ -173,16 +173,32 @@ describe('formatHookSummary', () => {
   it('leads with the task and ship decision', () => {
     const output = formatHookSummary(report);
     const lines = output.split('\n');
+
     expect(lines[0]).toBe('SpecTruth — Done Integrity');
-    expect(lines[1]).toContain('Completed task 2: Enforce record ownership');
-    expect(lines[2]).toBe('Ship decision: REVIEW_REQUIRED');
+    expect(output).toContain('Task 2  Enforce record ownership   ← marked complete');
+    expect(output).toContain('SHIP DECISION  REVIEW_REQUIRED');
   });
 
-  it('lists state counts and the gap', () => {
+  it('shows what was required, what was found, and what is missing', () => {
     const output = formatHookSummary(report);
-    expect(output).toContain('0 supported');
-    expect(output).toContain('1 unverified');
-    expect(output).toContain('gap:');
+
+    expect(output).toContain('required');
+    // The criterion is wrapped, so assert a fragment that fits one line.
+    expect(output).toContain('WHEN the caller is not the owner');
+    expect(output).toContain('found');
+    expect(output).toContain('missing');
+  });
+
+  it('counts only the states that occurred', () => {
+    const output = formatHookSummary(report);
+
+    expect(output).toContain('1 criterion checked: 1 unverified');
+    expect(output).not.toContain('0 supported');
+    expect(output).not.toContain('0 partial');
+  });
+
+  it('states when the verdict used no model', () => {
+    expect(formatHookSummary(report)).toContain('No model was used.');
   });
 
   it('includes the report path when provided', () => {
@@ -190,7 +206,7 @@ describe('formatHookSummary', () => {
       .toContain('Full report: /project/.spectruth/reports/x.json');
   });
 
-  it('says so when everything is supported', () => {
+  it('omits the missing line when a criterion is supported', () => {
     const ready = buildTaskAuditReport({
       spec: spec(),
       transition: TRANSITION,
@@ -204,8 +220,15 @@ describe('formatHookSummary', () => {
     });
 
     const output = formatHookSummary(ready);
-    expect(output).toContain('Ship decision: READY');
-    expect(output).toContain('All linked criteria are supported by evidence.');
+    expect(output).toContain('SHIP DECISION  READY');
+    expect(output).toContain('REQ-1-AC-2   SUPPORTED');
+    expect(output).not.toContain('missing');
+  });
+
+  it('lists repair preview ids when they are supplied', () => {
+    const output = formatHookSummary(report, { previewIds: ['RP-abc12345'] });
+    expect(output).toContain('Repair preview available: RP-abc12345');
+    expect(output).toContain('Nothing has been changed.');
   });
 
   it('prioritizes unsupported findings ahead of unverified ones', () => {
@@ -240,10 +263,9 @@ describe('formatHookSummary', () => {
     });
 
     const output = formatHookSummary(mixed);
-    expect(output).toContain('Ship decision: BLOCKED');
+    expect(output).toContain('SHIP DECISION  BLOCKED');
     expect(output.indexOf('REQ-1-AC-2')).toBeLessThan(output.indexOf('REQ-1-AC-1'));
-    expect(output).toContain('repair preview is available');
-    expect(output).toContain('change nothing until you approve');
+    expect(output).toContain('2 criteria checked: 1 unsupported, 1 unverified');
   });
 
   it('formats the no-transition case', () => {
