@@ -133,6 +133,7 @@ export async function collectSourceSnippets(
   for (const criterion of criteria) {
     const result = await findRelevantCode(criterion, codebasePath, maxPerCriterion);
     for (const snippet of result.snippets) {
+      if (!isImplementationFile(snippet.filePath)) continue;
       const key = `${snippet.filePath}:${snippet.startLine}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -141,6 +142,24 @@ export async function collectSourceSnippets(
   }
 
   return allSnippets;
+}
+
+/**
+ * Documentation states intent; it is not evidence that behavior exists.
+ *
+ * A README or spec that describes returning 403 must never be cited as proof
+ * that the code returns 403 — that is precisely the false support this tool
+ * exists to catch.
+ */
+export function isImplementationFile(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+
+  if (normalized.endsWith('.md') || normalized.endsWith('.mdx')) return false;
+  if (normalized.includes('.kiro/')) return false;
+  if (normalized.includes('.spectruth/')) return false;
+  if (normalized.startsWith('docs/') || normalized.includes('/docs/')) return false;
+
+  return true;
 }
 
 // ─── Static Check Collector ──────────────────────────────────────────────────

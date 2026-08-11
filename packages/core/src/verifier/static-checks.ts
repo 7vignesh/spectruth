@@ -79,12 +79,15 @@ function checkRouteExistence(text: string, snippets: CodeSnippet[]): StaticCheck
   for (const snippet of snippets) {
     for (const pattern of routePatterns) {
       if (pattern.test(snippet.content)) {
+        // Cite the line the route is actually on, not the snippet start.
+        const lines = snippet.content.split('\n');
+        const lineIdx = lines.findIndex(line => pattern.test(line));
         return {
           type: 'route',
           found: true,
           detail: `Found ${mentionedMethod.toUpperCase()} route definition`,
           file: snippet.filePath,
-          line: snippet.startLine,
+          line: snippet.startLine + (lineIdx >= 0 ? lineIdx : 0),
         };
       }
     }

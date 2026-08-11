@@ -206,9 +206,21 @@ function adjudicateDeterministically(
   let state: EvidenceState;
   let justification: string;
 
-  if (isSecuritySensitiveCriterion(criterion) && found.length === 0) {
-    state = 'UNSUPPORTED';
-    justification = 'This security-sensitive criterion requires explicit enforcement evidence, but none was found by deterministic checks.';
+  if (isSecuritySensitiveCriterion(criterion)) {
+    // Half an authorization check protects nothing, so partial enforcement of a
+    // security requirement is unsupported rather than partial.
+    if (found.length === 0) {
+      state = 'UNSUPPORTED';
+      justification = 'This security-sensitive criterion requires explicit enforcement evidence, and none was found.';
+    } else if (missing.length > 0) {
+      state = 'UNSUPPORTED';
+      justification =
+        `This security-sensitive criterion is not fully enforced: ${missing.map(f => f.detail).join('; ')}. `
+        + 'Partial enforcement of a security requirement is not enforcement.';
+    } else {
+      state = 'SUPPORTED';
+      justification = `Enforcement is present: ${found.map(f => f.detail).join('; ')}.`;
+    }
   } else if (found.length > 0 && missing.length === 0) {
     state = 'SUPPORTED';
     justification = `Deterministic checks confirm the criterion: ${found.map(f => f.detail).join('; ')}.`;
