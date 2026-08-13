@@ -15,6 +15,9 @@
  * operational failures.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import {
   approveRepair,
@@ -34,12 +37,27 @@ import {
   type HookResult,
 } from 'spectruth-core';
 
+/**
+ * Read from the manifest rather than hardcoding. The literal had drifted to
+ * 0.1.0 while the package was published as 0.1.1, so `--version` reported a
+ * release that did not exist.
+ */
+function packageVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const manifest = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf-8'));
+    return typeof manifest.version === 'string' ? manifest.version : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 const program = new Command();
 
 program
   .name('spectruth')
   .description('Done Integrity ship gate for Kiro spec tasks')
-  .version('0.1.0');
+  .version(packageVersion());
 
 interface HookCommandOptions {
   spec?: string;
