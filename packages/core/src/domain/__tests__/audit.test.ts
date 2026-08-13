@@ -138,6 +138,37 @@ describe('ship policy', () => {
     expect(deriveShipStatus(counts({ unsupported: 1 }))).toBe('BLOCKED');
   });
 
+  /**
+   * Credential storage was previously not recognised as security-sensitive, so
+   * a criterion requiring bcrypt hashing was adjudicated as an ordinary
+   * unproven behaviour instead of a blocking absence.
+   */
+  it('treats credential storage criteria as security-sensitive', () => {
+    const texts = [
+      'WHEN a user registers THEN the system SHALL hash the password using bcrypt',
+      'The system SHALL store passwords using argon2',
+      'WHEN a request is unauthenticated THEN the system SHALL return 401',
+      'WHEN credentials do not match THEN the system SHALL refuse the request',
+      'The system SHALL reject an invalid api key',
+    ];
+
+    for (const text of texts) {
+      expect(isSecuritySensitiveCriterion(text), text).toBe(true);
+      expect(stateForAbsentImplementation(text)).toBe('UNSUPPORTED');
+    }
+  });
+
+  it('does not treat ordinary behaviour criteria as security-sensitive', () => {
+    const texts = [
+      'WHEN a client requests the log THEN the system SHALL return at most 50 entries per page',
+      'WHEN a record is created THEN the system SHALL return 201',
+    ];
+
+    for (const text of texts) {
+      expect(isSecuritySensitiveCriterion(text), text).toBe(false);
+    }
+  });
+
   it('round-trips a complete report with its ship decision intact', () => {
     const finding = criterion('UNVERIFIED');
     const report: SpecAuditReport = {

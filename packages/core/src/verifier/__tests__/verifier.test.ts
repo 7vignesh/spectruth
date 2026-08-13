@@ -32,6 +32,7 @@ const SAMPLE_SNIPPETS: CodeSnippet[] = [{
 const staticEvidence = [{
   type: 'pattern' as const,
   found: true,
+  strength: 'specific' as const,
   detail: 'Status code 409 found in code',
   file: 'src/routes/auth.ts',
   line: 10,
@@ -175,6 +176,127 @@ describe('runStaticChecks', () => {
       keyword: 'plain',
     };
     expect(runStaticChecks(criterion, [], '.')).toEqual([]);
+  });
+});
+
+/**
+ * These guard the defect where a criterion requiring bcrypt password hashing
+ * was reported SUPPORTED because a POST route existed. Route presence locates
+ * a behaviour; it never demonstrates one.
+ */
+describe('static check evidence strength', () => {
+  const routeOnlySnippets: CodeSnippet[] = [{
+    filePath: 'src/register.ts',
+    content: "router.post('/register', (req, res) => { accounts.push({ email, password }); return res.status(201).json({}); });",
+    startLine: 1,
+    endLine: 1,
+    language: 'typescript',
+  }];
+
+  it('marks a route definition as corroborating, never specific', () => {
+    const criterion: AcceptanceCriterion = {
+      id: 'REQ-1-AC-1',
+      text: 'WHEN a user registers via POST /register THEN the system SHALL persist the account',
+      keyword: 'WHEN/THEN',
+    };
+
+    const route = runStaticChecks(criterion, routeOnlySnippets, '.')
+      .find(result => result.type === 'route');
+
+    expect(route?.found).toBe(true);
+    expect(route?.strength).toBe('corroborating');
+  });
+
+  it('reports a named technique as absent when it appears nowhere', () => {
+    const criterion: AcceptanceCriterion = {
+      id: 'REQ-1-AC-1',
+      text: 'WHEN a user registers via POST /register THEN the system SHALL hash the password using bcrypt',
+      keyword: 'WHEN/THEN',
+    };
+
+    const results = runStaticChecks(criterion, routeOnlySnippets, '.');
+    const technique = results.find(result => result.type === 'technique');
+
+    expect(technique?.found).toBe(false);
+    expect(technique?.strength).toBe('specific');
+    expect(technique?.detail).toMatch(/bcrypt/i);
+
+    // The route is still found — which is exactly why route evidence alone
+    // must not be allowed to carry the criterion.
+    expect(results.find(result => result.type === 'route')?.found).toBe(true);
+  });
+
+  it('reports a named technique as present when the code uses it', () => {
+    const criterion: AcceptanceCriterion = {
+      id: 'REQ-1-AC-1',
+      text: 'WHEN a user registers THEN the system SHALL hash the password using bcrypt',
+      keyword: 'WHEN/THEN',
+    };
+    const snippets: CodeSnippet[] = [{
+      filePath: 'src/register.ts',
+      content: "const digest = await bcrypt.hash(password, 10);",
+      startLine: 4,
+      endLine: 4,
+      language: 'typescript',
+    }];
+
+    const technique = runStaticChecks(criterion, snippets, '.')
+      .find(result => result.type === 'technique');
+
+    expect(technique?.found).toBe(true);
+    expect(technique?.strength).toBe('specific');
+  });
+
+  it('does not read an HTTP verb out of an unrelated word', () => {
+    const criterion: AcceptanceCriterion = {
+      id: 'REQ-1-AC-1',
+      text: 'WHEN the budget is exceeded THEN the system SHALL notify the owner',
+      keyword: 'WHEN/THEN',
+    };
+
+    const results = runStaticChecks(criterion, routeOnlySnippets, '.');
+
+    expect(results.find(result => result.type === 'route')).toBeUndefined();
+  });
+
+  it('detects a stated numeric limit as specific evidence', () => {
+    const criterion: AcceptanceCriterion = {
+      id: 'REQ-1-AC-1',
+      text: 'WHEN a client requests the log THEN the system SHALL return at most 50 entries per page',
+      keyword: 'WHEN/THEN',
+    };
+    const snippets: CodeSnippet[] = [{
+      filePath: 'src/audit.ts',
+      content: 'const PAGE_SIZE = 50;',
+      startLine: 3,
+      endLine: 3,
+      language: 'typescript',
+    }];
+
+    const limit = runStaticChecks(criterion, snippets, '.')
+      .find(result => result.type === 'limit');
+
+    expect(limit?.found).toBe(true);
+    expect(limit?.strength).toBe('specific');
+  });
+
+  it('reports a stated numeric limit as absent when the code omits it', () => {
+    const criterion: AcceptanceCriterion = {
+      id: 'REQ-1-AC-1',
+      text: 'WHEN a client requests the log THEN the system SHALL return at most 50 entries per page',
+      keyword: 'WHEN/THEN',
+    };
+    const snippets: CodeSnippet[] = [{
+      filePath: 'src/audit.ts',
+      content: 'return res.json({ entries: all });',
+      startLine: 3,
+      endLine: 3,
+      language: 'typescript',
+    }];
+
+    expect(
+      runStaticChecks(criterion, snippets, '.').find(result => result.type === 'limit')?.found,
+    ).toBe(false);
   });
 });
 

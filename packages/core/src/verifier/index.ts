@@ -267,15 +267,24 @@ function buildStaticOnlyAudit(
 ): CriterionAudit {
   const found = staticResults.filter(result => result.found);
   const missing = staticResults.filter(result => !result.found);
+  // Route existence is corroborating only; it locates the behaviour without
+  // demonstrating it. See the note in evidence/adjudicate.ts.
+  const specificFound = found.filter(result => result.strength === 'specific');
+  const onlyCorroborating = found.length > 0 && specificFound.length === 0;
   let state: EvidenceState;
   let justification: string;
 
-  if (found.length > 0 && missing.length === 0) {
+  if (specificFound.length > 0 && missing.length === 0) {
     state = 'SUPPORTED';
-    justification = `Deterministic checks support the criterion: ${found.map(result => result.detail).join('; ')}`;
-  } else if (found.length > 0) {
-    state = 'PARTIAL';
+    justification = `Deterministic checks support the criterion: ${specificFound.map(result => result.detail).join('; ')}`;
+  } else if (found.length > 0 && missing.length > 0) {
+    state = isSecuritySensitiveCriterion(criterion) ? 'UNSUPPORTED' : 'PARTIAL';
     justification = `Some deterministic checks support the criterion, while others do not: ${missing.map(result => result.detail).join('; ')}`;
+  } else if (onlyCorroborating) {
+    state = isSecuritySensitiveCriterion(criterion) ? 'UNSUPPORTED' : 'UNVERIFIED';
+    justification =
+      `Only corroborating evidence was found (${found.map(result => result.detail).join('; ')}), `
+      + 'which does not establish the behavior the criterion requires.';
   } else if (snippets.length > 0) {
     state = 'UNVERIFIED';
     justification = 'Relevant source was found, but deterministic evidence cannot establish the required behavior.';

@@ -16,10 +16,26 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import type { AcceptanceCriterion, CodeSnippet } from '../types.js';
 
+/**
+ * How much a check can prove.
+ *
+ * `specific` checks test the behaviour the criterion actually requires — a
+ * status code, a named algorithm, a stated limit. They can carry a criterion
+ * to SUPPORTED on their own.
+ *
+ * `corroborating` checks only establish that there is somewhere for the
+ * behaviour to live. A route definition proves an endpoint exists; it says
+ * nothing about whether that endpoint hashes a password or refuses a
+ * request. Corroborating evidence alone must never reach SUPPORTED — that
+ * mistake is precisely the false completion claim this tool exists to catch.
+ */
+export type CheckStrength = 'specific' | 'corroborating';
+
 export interface StaticCheckResult {
-  type: 'route' | 'file' | 'dependency' | 'env' | 'test' | 'pattern';
+  type: 'route' | 'file' | 'dependency' | 'env' | 'test' | 'pattern' | 'technique' | 'limit';
   found: boolean;
   detail: string;
+  strength: CheckStrength;
   file?: string;
   line?: number;
 }
@@ -42,6 +58,14 @@ export function runStaticChecks(
   const statusCheck = checkStatusCode(criterion.text, snippets);
   if (statusCheck) results.push(statusCheck);
 
+  // A criterion that names an algorithm or library is making a checkable claim
+  // about *how* the behaviour is implemented, not merely that it exists.
+  const techniqueCheck = checkNamedTechnique(criterion.text, snippets, codebasePath);
+  if (techniqueCheck) results.push(techniqueCheck);
+
+  const limitCheck = checkNumericLimit(criterion.text, snippets);
+  if (limitCheck) results.push(limitCheck);
+
   const routeCheck = checkRouteExistence(text, snippets);
   if (routeCheck) results.push(routeCheck);
 
@@ -62,11 +86,17 @@ export function runStaticChecks(
 
 /**
  * Check if a route/endpoint mentioned in the criterion exists in the code.
+ *
+ * This is corroborating evidence only. It proves an endpoint exists, never
+ * that the endpoint does what the criterion requires.
  */
 function checkRouteExistence(text: string, snippets: CodeSnippet[]): StaticCheckResult | null {
   // Extract HTTP methods and paths from criterion
   const httpMethods = ['get', 'post', 'put', 'patch', 'delete'];
-  const mentionedMethod = httpMethods.find(m => text.includes(m));
+  // Matched on a word boundary: "budget" and "target" are not GET requests.
+  const mentionedMethod = httpMethods.find(method =>
+    new RegExp(`\\b${method}\\b`, 'i').test(text),
+  );
 
   if (!mentionedMethod) return null;
 
@@ -86,6 +116,7 @@ function checkRouteExistence(text: string, snippets: CodeSnippet[]): StaticCheck
         return {
           type: 'route',
           found: true,
+          strength: 'corroborating',
           detail: `Found ${mentionedMethod.toUpperCase()} route definition`,
           file: snippet.filePath,
           line: snippet.startLine + (lineIdx >= 0 ? lineIdx : 0),
@@ -97,6 +128,7 @@ function checkRouteExistence(text: string, snippets: CodeSnippet[]): StaticCheck
   return {
     type: 'route',
     found: false,
+    strength: 'corroborating',
     detail: `No ${mentionedMethod.toUpperCase()} route definition found in relevant code`,
   };
 }
@@ -118,6 +150,7 @@ function checkStatusCode(text: string, snippets: CodeSnippet[]): StaticCheckResu
       return {
         type: 'pattern',
         found: true,
+        strength: 'specific',
         detail: `Status code ${statusCode} found in code`,
         file: snippet.filePath,
         line: snippet.startLine + (lineIdx >= 0 ? lineIdx : 0),
@@ -128,8 +161,136 @@ function checkStatusCode(text: string, snippets: CodeSnippet[]): StaticCheckResu
   return {
     type: 'pattern',
     found: false,
+    strength: 'specific',
     detail: `Status code ${statusCode} not found in relevant code`,
   };
+}
+
+/**
+ * Check a technique the criterion names explicitly.
+ *
+ * When a criterion says "hash the password using bcrypt", the word bcrypt is
+ * the checkable part. If it appears nowhere in the relevant source and nowhere
+ * in the manifest, the claim is contradicted rather than merely unproven.
+ */
+function checkNamedTechnique(
+  text: string,
+  snippets: CodeSnippet[],
+  codebasePath: string,
+): StaticCheckResult | null {
+  const named = NAMED_TECHNIQUES.find(technique => technique.term.test(text));
+  if (!named) return null;
+
+  for (const snippet of snippets) {
+    for (const token of named.tokens) {
+      const pattern = new RegExp(`\\b${escapeRegExp(token)}`, 'i');
+      if (!pattern.test(snippet.content)) continue;
+
+      const lines = snippet.content.split('\n');
+      const lineIdx = lines.findIndex(line => pattern.test(line));
+      return {
+        type: 'technique',
+        found: true,
+        strength: 'specific',
+        detail: `${named.label} referenced in code`,
+        file: snippet.filePath,
+        line: snippet.startLine + (lineIdx >= 0 ? lineIdx : 0),
+      };
+    }
+  }
+
+  // A manifest entry is weaker than a call site but still shows the technique
+  // was actually reached for, so it is reported separately from source use.
+  if (manifestMentions(codebasePath, named.tokens)) {
+    return {
+      type: 'technique',
+      found: true,
+      strength: 'specific',
+      detail: `${named.label} declared in package.json but not found in the relevant code`,
+      file: 'package.json',
+    };
+  }
+
+  return {
+    type: 'technique',
+    found: false,
+    strength: 'specific',
+    detail: `${named.label} is required by this criterion but appears nowhere in the relevant code or package.json`,
+  };
+}
+
+/**
+ * Check a numeric bound the criterion states, such as "at most 50 per page".
+ */
+function checkNumericLimit(text: string, snippets: CodeSnippet[]): StaticCheckResult | null {
+  const match = text.match(
+    /\b(?:at most|no more than|maximum of|up to|limited to|cap(?:ped)? at)\s+(\d+)\b/i,
+  );
+  if (!match) return null;
+
+  const limit = match[1];
+
+  for (const snippet of snippets) {
+    const pattern = new RegExp(`\\b${limit}\\b`);
+    if (!pattern.test(snippet.content)) continue;
+
+    const lines = snippet.content.split('\n');
+    const lineIdx = lines.findIndex(line => pattern.test(line));
+    return {
+      type: 'limit',
+      found: true,
+      strength: 'specific',
+      detail: `Limit ${limit} found in code`,
+      file: snippet.filePath,
+      line: snippet.startLine + (lineIdx >= 0 ? lineIdx : 0),
+    };
+  }
+
+  return {
+    type: 'limit',
+    found: false,
+    strength: 'specific',
+    detail: `Stated limit of ${limit} not found in relevant code`,
+  };
+}
+
+/**
+ * Techniques a criterion can name by hand. Each entry pairs the phrasing a
+ * requirement would use with the tokens that would appear if it were really
+ * implemented.
+ */
+const NAMED_TECHNIQUES: Array<{ term: RegExp; label: string; tokens: string[] }> = [
+  { term: /\bbcrypt\b/i, label: 'bcrypt', tokens: ['bcrypt'] },
+  { term: /\bargon2\b/i, label: 'argon2', tokens: ['argon2'] },
+  { term: /\bscrypt\b/i, label: 'scrypt', tokens: ['scrypt'] },
+  { term: /\bpbkdf2\b/i, label: 'PBKDF2', tokens: ['pbkdf2'] },
+  { term: /\bhmac\b/i, label: 'HMAC', tokens: ['hmac', 'createHmac'] },
+  { term: /\bsha-?256\b/i, label: 'SHA-256', tokens: ['sha256'] },
+  { term: /\bsha-?512\b/i, label: 'SHA-512', tokens: ['sha512'] },
+  { term: /\baes(?:-\d+)?\b/i, label: 'AES', tokens: ['aes', 'createCipher'] },
+  { term: /\bjwt\b|\bjson web token\b/i, label: 'JWT', tokens: ['jwt', 'jsonwebtoken', 'jose'] },
+  { term: /\bcsrf\b/i, label: 'CSRF protection', tokens: ['csrf', 'csurf'] },
+  { term: /\bcors\b/i, label: 'CORS', tokens: ['cors'] },
+  { term: /\buuid\b/i, label: 'UUID', tokens: ['uuid', 'randomUUID'] },
+];
+
+function manifestMentions(codebasePath: string, tokens: string[]): boolean {
+  const pkgPath = join(codebasePath, 'package.json');
+  if (!existsSync(pkgPath)) return false;
+
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    const names = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+    return names.some(name =>
+      tokens.some(token => name.toLowerCase().includes(token.toLowerCase())),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -177,6 +338,7 @@ function checkDependency(text: string, codebasePath: string): StaticCheckResult 
         return {
           type: 'dependency',
           found: true,
+          strength: 'specific',
           detail: `Dependency "${dep}" found in package.json`,
           file: 'package.json',
         };
@@ -186,6 +348,7 @@ function checkDependency(text: string, codebasePath: string): StaticCheckResult 
     return {
       type: 'dependency',
       found: false,
+      strength: 'specific',
       detail: `No relevant dependency found (expected one of: ${relevantDeps.slice(0, 3).join(', ')})`,
       file: 'package.json',
     };
@@ -223,6 +386,7 @@ function checkTestExists(
       return {
         type: 'test',
         found: true,
+        strength: 'corroborating',
         detail: `Test file exists: ${pattern}`,
         file: pattern,
       };
@@ -249,6 +413,7 @@ function checkEnvVariable(text: string, codebasePath: string): StaticCheckResult
       return {
         type: 'env',
         found: true,
+        strength: 'corroborating',
         detail: `Config file found: ${envFile}`,
         file: envFile,
       };

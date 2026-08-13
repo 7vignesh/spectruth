@@ -16,6 +16,7 @@ import type {
   KiroSpec,
   Requirement,
 } from '../types.js';
+import type { CheckStrength } from '../verifier/static-checks.js';
 
 /** A single Git diff hunk relevant to the completed task. */
 export interface DiffHunk {
@@ -30,6 +31,12 @@ export interface StaticFinding {
   criterionId: string;
   found: boolean;
   detail: string;
+  /**
+   * Whether this finding tests the required behaviour (`specific`) or merely
+   * that somewhere for it to live exists (`corroborating`). Corroborating
+   * evidence alone cannot support a criterion.
+   */
+  strength: CheckStrength;
   file?: string;
   line?: number;
 }

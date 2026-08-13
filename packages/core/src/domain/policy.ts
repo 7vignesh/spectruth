@@ -20,15 +20,31 @@ export const SHIP_STATUSES = [
 const SECURITY_TERMS = [
   /\badmin(?:istrator)?\b/i,
   /\bauthori[sz](?:e|ed|ation)\b/i,
+  /\bunauthori[sz]ed\b/i,
   /\bpermission\b/i,
   /\brole[- ]based\b/i,
   /\bownership\b/i,
   /\bonly (?:the )?(?:owner|user)\b/i,
+  /\bdo(?:es)? not own\b/i,
   /\bforbidden\b/i,
   /\b403\b/,
+  /\b401\b/,
   /\bsecret\b/i,
-  /\bcredential\b/i,
+  /\bcredentials?\b/i,
   /\bencrypt(?:ed|ion)?\b/i,
+  // Credential storage. A requirement to hash a password is a security
+  // requirement; without these the engine treated absent hashing as an
+  // ordinary unproven behaviour instead of a blocking absence.
+  /\bpasswords?\b/i,
+  /\bpassphrase\b/i,
+  /\bhash(?:ed|es|ing)?\b/i,
+  /\bbcrypt\b/i,
+  /\bargon2\b/i,
+  /\bscrypt\b/i,
+  /\bpbkdf2\b/i,
+  /\bauthenticat(?:e|ed|ion)\b/i,
+  /\bunauthenticated\b/i,
+  /\bapi key\b/i,
 ];
 
 export function isSecuritySensitiveCriterion(
@@ -43,11 +59,13 @@ export function isSecuritySensitiveCriterion(
  * an unknown one. Other absent implementation evidence is also unsupported;
  * UNVERIFIED is reserved for implementation that exists but lacks observable
  * proof for its behavior.
+ *
+ * Both cases return the same state, so this reads as a constant. It is kept as
+ * a named function because callers are asserting *why* they block, and the
+ * security reasoning above is the part worth not losing.
  */
-export function stateForAbsentImplementation(criterionText: string): EvidenceState {
-  return isSecuritySensitiveCriterion(criterionText)
-    ? 'UNSUPPORTED'
-    : 'UNSUPPORTED';
+export function stateForAbsentImplementation(_criterionText: string): EvidenceState {
+  return 'UNSUPPORTED';
 }
 
 export function deriveRequirementState(

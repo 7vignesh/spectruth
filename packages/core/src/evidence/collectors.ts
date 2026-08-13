@@ -184,6 +184,7 @@ export function collectStaticFindings(
         criterionId: criterion.id,
         found: result.found,
         detail: result.detail,
+        strength: result.strength,
         file: result.file,
         line: result.line,
       });

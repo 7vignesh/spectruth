@@ -203,6 +203,13 @@ function adjudicateDeterministically(
   const hasSource = bundle.sourceSnippets.length > 0;
   const hasChanges = bundle.changedFiles.length > 0;
 
+  // A route definition proves an endpoint exists, not that it does what the
+  // criterion requires. Treating that as support once let a criterion demanding
+  // bcrypt password hashing pass on the strength of a POST route alone, so
+  // support now requires at least one check that tested the behaviour itself.
+  const specificFound = found.filter(finding => finding.strength === 'specific');
+  const onlyCorroborating = found.length > 0 && specificFound.length === 0;
+
   let state: EvidenceState;
   let justification: string;
 
@@ -217,16 +224,26 @@ function adjudicateDeterministically(
       justification =
         `This security-sensitive criterion is not fully enforced: ${missing.map(f => f.detail).join('; ')}. `
         + 'Partial enforcement of a security requirement is not enforcement.';
+    } else if (onlyCorroborating) {
+      state = 'UNSUPPORTED';
+      justification =
+        `Only the presence of an implementation site could be confirmed (${found.map(f => f.detail).join('; ')}), `
+        + 'which does not demonstrate the enforcement this security-sensitive criterion requires.';
     } else {
       state = 'SUPPORTED';
-      justification = `Enforcement is present: ${found.map(f => f.detail).join('; ')}.`;
+      justification = `Enforcement is present: ${specificFound.map(f => f.detail).join('; ')}.`;
     }
-  } else if (found.length > 0 && missing.length === 0) {
+  } else if (specificFound.length > 0 && missing.length === 0) {
     state = 'SUPPORTED';
-    justification = `Deterministic checks confirm the criterion: ${found.map(f => f.detail).join('; ')}.`;
+    justification = `Deterministic checks confirm the criterion: ${specificFound.map(f => f.detail).join('; ')}.`;
   } else if (found.length > 0 && missing.length > 0) {
     state = 'PARTIAL';
     justification = `Some checks pass (${found.map(f => f.detail).join('; ')}), but others do not (${missing.map(f => f.detail).join('; ')}).`;
+  } else if (onlyCorroborating) {
+    state = 'UNVERIFIED';
+    justification =
+      `Only corroborating evidence was found (${found.map(f => f.detail).join('; ')}). `
+      + 'It establishes where the behavior would live but not that the behavior is implemented.';
   } else if (hasSource || hasChanges) {
     state = 'UNVERIFIED';
     justification = 'Relevant source or file changes exist, but deterministic checks cannot confirm the required behavior without an LLM provider.';
@@ -235,13 +252,18 @@ function adjudicateDeterministically(
     justification = 'No implementation evidence was found for this criterion.';
   }
 
+  const gaps = missing.map(f => f.detail);
+  if (onlyCorroborating) {
+    gaps.push('No check established the behavior the criterion requires.');
+  }
+
   return createCriterionAudit({
     criterionId: criterion.id,
     criterionText: criterion.text,
     state,
     justification,
     evidence: allEvidence,
-    gaps: missing.map(f => f.detail),
+    gaps,
   });
 }
 
