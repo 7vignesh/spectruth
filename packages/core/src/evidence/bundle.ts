@@ -9,7 +9,7 @@ import type { TaskEvidenceBundle, BuildBundleOptions } from './types.js';
 import { DEFAULT_MAX_DIFF_HUNKS, DEFAULT_MAX_SNIPPETS_PER_CRITERION } from './types.js';
 import {
   collectDiffHunks,
-  collectSourceSnippets,
+  collectSnippetsByCriterion,
   collectStaticFindings,
 } from './collectors.js';
 
@@ -30,8 +30,12 @@ export async function buildEvidenceBundle(
   const designContext = links?.designSections ?? [];
 
   const diffHunks = collectDiffHunks(transition, codebasePath, maxDiffHunks);
-  const sourceSnippets = await collectSourceSnippets(criteria, codebasePath, maxSnippetsPerCriterion);
-  const staticFindings = collectStaticFindings(criteria, sourceSnippets, codebasePath);
+  const { all: sourceSnippets, byCriterion } = await collectSnippetsByCriterion(
+    criteria,
+    codebasePath,
+    maxSnippetsPerCriterion,
+  );
+  const staticFindings = collectStaticFindings(criteria, byCriterion, codebasePath);
 
   return {
     taskId: transition.taskId,

@@ -497,7 +497,7 @@ function KiroIntegration() {
       <Reveal delay={240}>
         <div className="mt-8 rounded-lg border border-edge bg-ink-raised p-5">
           <p className="font-mono text-sm text-text-faint">
-            Built for the Ready, Spec, Ship hackathon · spec-first · 322 tests
+            Built for the Ready, Spec, Ship hackathon · spec-first · 338 tests
           </p>
         </div>
       </Reveal>

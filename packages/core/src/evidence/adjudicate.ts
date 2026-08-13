@@ -244,6 +244,13 @@ function adjudicateDeterministically(
     justification =
       `Only corroborating evidence was found (${found.map(f => f.detail).join('; ')}). `
       + 'It establishes where the behavior would live but not that the behavior is implemented.';
+  } else if (missing.some(f => f.strength === 'specific')) {
+    // A specific check that ran and found nothing is a demonstrated absence,
+    // not an unknown. Unrelated file churn previously lifted this to
+    // UNVERIFIED, which reported a missing rate limit as merely unproven.
+    state = 'UNSUPPORTED';
+    justification =
+      `The criterion requires behavior that is demonstrably absent: ${missing.map(f => f.detail).join('; ')}.`;
   } else if (hasSource || hasChanges) {
     state = 'UNVERIFIED';
     justification = 'Relevant source or file changes exist, but deterministic checks cannot confirm the required behavior without an LLM provider.';

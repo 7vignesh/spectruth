@@ -29,6 +29,7 @@ export type SpecTruthErrorCode =
   | 'PREVIEW_NOT_FOUND'
   | 'APPROVAL_REQUIRED'
   | 'APPROVAL_STALE'
+  | 'REPORT_SUPERSEDED'
   | 'VERIFICATION_FAILED';
 
 export class SpecTruthError extends Error {

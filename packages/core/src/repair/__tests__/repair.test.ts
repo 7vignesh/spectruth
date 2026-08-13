@@ -428,6 +428,28 @@ describe('checkApproval', () => {
     })).toThrowError(expect.objectContaining({ code: 'APPROVAL_STALE' }));
   });
 
+  /**
+   * Consent recorded against a report a later audit has replaced would
+   * authorize a gap that may already be closed, so it is refused when it is
+   * granted rather than only when a repair is attempted.
+   */
+  it('approveRepair refuses a report that has been superseded', async () => {
+    const report = await auditOnce();
+    const previews = buildRepairPreviews(report);
+    savePreviews(root, report.reportId, previews);
+
+    writeFileSync(join(root, 'src', 'records.ts'), SAFE_ROUTE, 'utf-8');
+    const fresh = await auditOnce();
+    expect(fresh.reportId).not.toBe(report.reportId);
+
+    expect(() => approveRepair({
+      projectRoot: root,
+      reportId: report.reportId,
+      previewId: previews[0].previewId,
+      codePath: root,
+    })).toThrowError(expect.objectContaining({ code: 'REPORT_SUPERSEDED' }));
+  });
+
   it('assertApproved returns the approval when consent is valid', async () => {
     const { report, preview } = await approved();
 

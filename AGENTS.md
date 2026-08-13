@@ -36,7 +36,7 @@ callers. Keep it that way.
 
 ```bash
 pnpm build            # core then cli
-pnpm test             # 322 tests in core
+pnpm test             # 338 tests in core
 pnpm demo             # the full audit → repair → re-audit loop
 pnpm audit:example    # audits examples/records-api: task 1 READY, task 2 BLOCKED
 
@@ -92,7 +92,10 @@ promote them to dependencies.
 - **Refuse to guess.** Task inference requires exactly one incomplete → complete
   transition. Ambiguity returns a typed failure.
 - **`BLOCKED` exits 0 in hook mode** so the summary reaches agent context.
-  Non-zero is reserved for operational failures.
+  Non-zero is reserved for operational failures. Note that `audit` also always
+  exits 0, including on `BLOCKED` — so `spectruth audit && deploy` will deploy.
+  If a CI gate is wanted, that needs a deliberate decision about whether the
+  Kiro agent path can tolerate a non-zero exit.
 - **Never edit `tasks.md`.** No repair path may touch it; the shipped agent
   config denies it. Marking a task complete is the user's claim to make.
 - **Repair previews mutate nothing**, and approval is bound to one preview, one
@@ -121,7 +124,7 @@ that as the architecture: the engine decides, the agent narrates.
 ## Self-audit expectations
 
 Running SpecTruth on this repository returns `UNVERIFIED` for nearly every
-criterion, so `REVIEW_REQUIRED`, exit code 1. **That is correct.** These criteria
+criterion, so `REVIEW_REQUIRED`. **That is correct.** These criteria
 describe internal behaviour that static analysis cannot prove, and the evidence
 that would prove it is test output, which is not ingested. Do not "fix" this by
 loosening the checks.
@@ -150,6 +153,15 @@ output `dist`. Not yet deployed.
 
 ## Still pending
 
+0. **`checkApproval` / `assertApproved` are never called from the CLI.** They
+   implement the three documented refusals — widened scope, superseded report,
+   drifted code — and are unit-tested, but no CLI command invokes them. The
+   agent writes the repair itself, so nothing mechanically validates consent at
+   the moment of writing. `approveRepair` now refuses a superseded report, which
+   closes the most misleading case, but the README's "all three refusals are
+   typed and explained" describes the library, not the shipped CLI path. Wiring
+   a real gate means either a `repair --apply` command or a pre-write check in
+   the agent contract; both are design decisions, not cleanups.
 1. **Deploy the landing page.** The hackathon organizer said judges expect to run
    submissions, "preferably live."
 2. **Record the walkthrough video** and fill the placeholder.

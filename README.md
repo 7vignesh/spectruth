@@ -385,7 +385,7 @@ docs/             integration findings
 .kiro/            this project's own spec, skill, agent and hooks
 ```
 
-322 tests cover the domain model, ship policy, spec parsing, transition
+338 tests cover the domain model, ship policy, spec parsing, transition
 inference, evidence bundles, adjudication, the repair cycle, and the shipped Kiro
 configuration.
 

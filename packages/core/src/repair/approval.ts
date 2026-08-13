@@ -22,6 +22,7 @@ import type {
   RepairPreview,
 } from '../types.js';
 import { SpecTruthError } from '../errors.js';
+import { findCurrentReportForTask } from '../report/store.js';
 import { findPreview } from './preview.js';
 
 export const APPROVAL_DIR = join('.spectruth', 'approvals');
@@ -58,6 +59,18 @@ export function approveRepair(options: ApproveOptions): RepairApproval {
       `No repair preview ${options.previewId} exists for report ${options.reportId}.`,
       'PREVIEW_NOT_FOUND',
       'Run an audit to regenerate previews, then approve one of the listed ids.',
+    );
+  }
+
+  // Consent recorded against a superseded report would authorize a gap that a
+  // later audit may already have closed, so refuse it at the point of consent
+  // rather than only when a repair is attempted.
+  const current = findCurrentReportForTask(options.projectRoot, preview.taskId);
+  if (current && current.reportId !== options.reportId) {
+    throw new SpecTruthError(
+      `Report ${options.reportId} has been superseded by ${current.reportId} for task ${preview.taskId}.`,
+      'REPORT_SUPERSEDED',
+      'Re-run the audit, review the current preview, and approve that one instead.',
     );
   }
 

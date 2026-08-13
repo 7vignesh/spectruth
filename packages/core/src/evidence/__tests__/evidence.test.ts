@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { buildEvidenceBundle } from '../bundle.js';
 import { adjudicateBundle, buildAdjudicationPrompt } from '../adjudicate.js';
-import { transitionToEvidence, diffHunksToEvidence, staticFindingsToEvidence } from '../collectors.js';
+import { transitionToEvidence, diffHunksToEvidence, staticFindingsToEvidence, isImplementationFile } from '../collectors.js';
 import { loadKiroSpec } from '../../parser/kiro-spec.js';
 import { captureSnapshot, inferCompletedTaskForSpec, captureSpecSnapshot } from '../../snapshot/index.js';
 import type { CompletedTaskTransition, LLMProvider, TaskEvidenceBundle } from '../../types.js';
@@ -213,6 +213,30 @@ describe('buildAdjudicationPrompt', () => {
     const prompt = buildAdjudicationPrompt(bundle.criteria[0], bundle);
 
     expect(prompt).toMatch(/Only cite files and line numbers that appear in the evidence above/i);
+  });
+});
+
+describe('isImplementationFile', () => {
+  it('rejects documentation', () => {
+    for (const path of ['README.md', 'docs/design.md', '.kiro/specs/x/tasks.md', 'notes.mdx']) {
+      expect(isImplementationFile(path), path).toBe(false);
+    }
+  });
+
+  /**
+   * A changed .gitignore once lifted a missing rate limit from UNSUPPORTED to
+   * UNVERIFIED, because any file change counted as implementation activity.
+   */
+  it('rejects repository metadata and dotfiles', () => {
+    for (const path of ['.gitignore', '.env', '.npmrc', 'LICENSE', 'pnpm-lock.yaml', 'package-lock.json']) {
+      expect(isImplementationFile(path), path).toBe(false);
+    }
+  });
+
+  it('accepts source files', () => {
+    for (const path of ['src/auth.ts', 'lib/handler.py', 'package.json', 'src/app/page.tsx']) {
+      expect(isImplementationFile(path), path).toBe(true);
+    }
   });
 });
 

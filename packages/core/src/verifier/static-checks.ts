@@ -16,6 +16,95 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import type { AcceptanceCriterion, CodeSnippet } from '../types.js';
 
+/** Languages where `#` begins a comment. In TS/JS it is private-field syntax. */
+const HASH_COMMENT_LANGUAGES = new Set([
+  'python', 'yaml', 'toml', 'shell', 'bash', 'ruby', 'perl', 'text',
+]);
+
+/**
+ * Blank out comment bodies, preserving every line break and column.
+ *
+ * Documentation is not evidence, and a comment is documentation that happens to
+ * live in a source file. An early version cited a README as proof that code
+ * returned 403; this is the same failure one directory deeper — a doc comment
+ * reading "a non-administrator is refused with 403" was cited as the refusal
+ * itself.
+ *
+ * String literals are deliberately left intact: `throw new Error('403')` is
+ * behaviour, not commentary.
+ *
+ * Masking rather than deleting keeps line numbers aligned with the original, so
+ * a citation still points at the right place.
+ */
+export function maskComments(content: string, language = 'typescript'): string {
+  const hashComments = HASH_COMMENT_LANGUAGES.has(language);
+  const out = content.split('');
+
+  type Mode = 'code' | 'line' | 'block' | 'single' | 'double' | 'template';
+  let mode: Mode = 'code';
+
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    const next = content[i + 1];
+
+    switch (mode) {
+      case 'code':
+        if (ch === '/' && next === '/') {
+          mode = 'line';
+          out[i] = ' ';
+        } else if (ch === '/' && next === '*') {
+          mode = 'block';
+          out[i] = ' ';
+        } else if (hashComments && ch === '#') {
+          mode = 'line';
+          out[i] = ' ';
+        } else if (ch === "'") {
+          mode = 'single';
+        } else if (ch === '"') {
+          mode = 'double';
+        } else if (ch === '`') {
+          mode = 'template';
+        }
+        break;
+
+      case 'line':
+        if (ch === '\n') mode = 'code';
+        else out[i] = ' ';
+        break;
+
+      case 'block':
+        if (ch === '*' && next === '/') {
+          out[i] = ' ';
+          out[i + 1] = ' ';
+          i += 1;
+          mode = 'code';
+        } else if (ch !== '\n') {
+          out[i] = ' ';
+        }
+        break;
+
+      case 'single':
+      case 'double':
+      case 'template': {
+        if (ch === '\\') {
+          i += 1;
+          break;
+        }
+        const closer = mode === 'single' ? "'" : mode === 'double' ? '"' : '`';
+        if (ch === closer) mode = 'code';
+        break;
+      }
+    }
+  }
+
+  return out.join('');
+}
+
+/** A snippet with commentary removed, for pattern matching only. */
+function executableContent(snippet: CodeSnippet): string {
+  return maskComments(snippet.content, snippet.language);
+}
+
 /**
  * How much a check can prove.
  *
@@ -52,21 +141,27 @@ export function runStaticChecks(
   const results: StaticCheckResult[] = [];
   const text = criterion.text.toLowerCase();
 
+  // Restrict evidence to the endpoint the criterion names. Retrieval ranks by
+  // keyword overlap, and a status code is one of those keywords, so a criterion
+  // requiring 403 on GET /profile/:id would retrieve the unrelated route that
+  // legitimately returns 403 and accept it as enforcement.
+  const scoped = scopeToSubject(criterion.text, snippets);
+
   // Ordered from most to least specific to the criterion. Reporting cites the
   // first supporting evidence it finds, and a status code names the behaviour
   // being required far more precisely than the presence of a route does.
-  const statusCheck = checkStatusCode(criterion.text, snippets);
+  const statusCheck = checkStatusCode(criterion.text, scoped);
   if (statusCheck) results.push(statusCheck);
 
   // A criterion that names an algorithm or library is making a checkable claim
   // about *how* the behaviour is implemented, not merely that it exists.
-  const techniqueCheck = checkNamedTechnique(criterion.text, snippets, codebasePath);
+  const techniqueCheck = checkNamedTechnique(criterion.text, scoped, codebasePath);
   if (techniqueCheck) results.push(techniqueCheck);
 
-  const limitCheck = checkNumericLimit(criterion.text, snippets);
+  const limitCheck = checkNumericLimit(criterion.text, scoped);
   if (limitCheck) results.push(limitCheck);
 
-  const routeCheck = checkRouteExistence(text, snippets);
+  const routeCheck = checkRouteExistence(text, scoped);
   if (routeCheck) results.push(routeCheck);
 
   // Check for dependency mentions
@@ -74,7 +169,7 @@ export function runStaticChecks(
   if (depCheck) results.push(depCheck);
 
   // Check for test file existence
-  const testCheck = checkTestExists(text, snippets, codebasePath);
+  const testCheck = checkTestExists(text, scoped, codebasePath);
   if (testCheck) results.push(testCheck);
 
   // Check for environment variable
@@ -83,6 +178,54 @@ export function runStaticChecks(
 
   return results;
 }
+
+/**
+ * Narrow snippets to those implementing the endpoint the criterion names.
+ *
+ * Requirements in a Kiro spec name their subject: "GET /profile/:id", "POST
+ * /register". When they do, evidence for that criterion has to come from the
+ * handler for that path — a 403 in the account-deletion route says nothing
+ * about whether the profile route refuses a non-owner.
+ *
+ * Falls back to the unnarrowed set when no path is named or no snippet contains
+ * it, so a retrieval miss cannot manufacture a false absence.
+ */
+export function scopeToSubject(
+  criterionText: string,
+  snippets: CodeSnippet[],
+): CodeSnippet[] {
+  const anchors = routeAnchors(criterionText);
+  if (anchors.length === 0) return snippets;
+
+  const matching = snippets.filter(snippet => {
+    const code = executableContent(snippet);
+    return anchors.some(anchor => code.includes(anchor));
+  });
+
+  return matching.length > 0 ? matching : snippets;
+}
+
+/**
+ * Pull route path prefixes out of a criterion, e.g. "/profile/:id" → "/profile".
+ * The prefix is used rather than the full path so that ":id" versus "{id}"
+ * versus "<id>" parameter styles all still match.
+ */
+function routeAnchors(criterionText: string): string[] {
+  const anchors = new Set<string>();
+  const withoutUrls = criterionText.replace(/https?:\/\/\S+/gi, ' ');
+
+  for (const match of withoutUrls.matchAll(/\/([A-Za-z][A-Za-z0-9_-]*)/g)) {
+    const segment = match[1].toLowerCase();
+    // 'and/or' and similar prose are not routes.
+    if (segment.length < 2) continue;
+    if (PROSE_SLASH_WORDS.has(segment)) continue;
+    anchors.add(`/${match[1]}`);
+  }
+
+  return [...anchors];
+}
+
+const PROSE_SLASH_WORDS = new Set(['or', 'and', 'not', 'no', 'off', 'on']);
 
 /**
  * Check if a route/endpoint mentioned in the criterion exists in the code.
@@ -108,10 +251,11 @@ function checkRouteExistence(text: string, snippets: CodeSnippet[]): StaticCheck
   ];
 
   for (const snippet of snippets) {
+    const code = executableContent(snippet);
     for (const pattern of routePatterns) {
-      if (pattern.test(snippet.content)) {
+      if (pattern.test(code)) {
         // Cite the line the route is actually on, not the snippet start.
-        const lines = snippet.content.split('\n');
+        const lines = code.split('\n');
         const lineIdx = lines.findIndex(line => pattern.test(line));
         return {
           type: 'route',
@@ -143,9 +287,10 @@ function checkStatusCode(text: string, snippets: CodeSnippet[]): StaticCheckResu
   const statusCode = statusMatch[1];
 
   for (const snippet of snippets) {
-    if (snippet.content.includes(statusCode)) {
+    const code = executableContent(snippet);
+    if (code.includes(statusCode)) {
       // Find the specific line
-      const lines = snippet.content.split('\n');
+      const lines = code.split('\n');
       const lineIdx = lines.findIndex(l => l.includes(statusCode));
       return {
         type: 'pattern',
@@ -182,11 +327,12 @@ function checkNamedTechnique(
   if (!named) return null;
 
   for (const snippet of snippets) {
+    const code = executableContent(snippet);
     for (const token of named.tokens) {
       const pattern = new RegExp(`\\b${escapeRegExp(token)}`, 'i');
-      if (!pattern.test(snippet.content)) continue;
+      if (!pattern.test(code)) continue;
 
-      const lines = snippet.content.split('\n');
+      const lines = code.split('\n');
       const lineIdx = lines.findIndex(line => pattern.test(line));
       return {
         type: 'technique',
@@ -231,10 +377,11 @@ function checkNumericLimit(text: string, snippets: CodeSnippet[]): StaticCheckRe
   const limit = match[1];
 
   for (const snippet of snippets) {
+    const code = executableContent(snippet);
     const pattern = new RegExp(`\\b${limit}\\b`);
-    if (!pattern.test(snippet.content)) continue;
+    if (!pattern.test(code)) continue;
 
-    const lines = snippet.content.split('\n');
+    const lines = code.split('\n');
     const lineIdx = lines.findIndex(line => pattern.test(line));
     return {
       type: 'limit',

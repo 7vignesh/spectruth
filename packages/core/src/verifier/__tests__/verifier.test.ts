@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildVerificationPrompt, parseLLMResponse } from '../index.js';
 import { createProvider, isKiroSession } from '../provider.js';
-import { runStaticChecks } from '../static-checks.js';
+import { maskComments, runStaticChecks, scopeToSubject } from '../static-checks.js';
 import type { AcceptanceCriterion, CodeSnippet, LLMProvider } from '../../types.js';
 
 class MockProvider implements LLMProvider {
@@ -297,6 +297,118 @@ describe('static check evidence strength', () => {
     expect(
       runStaticChecks(criterion, snippets, '.').find(result => result.type === 'limit')?.found,
     ).toBe(false);
+  });
+});
+
+/**
+ * Commentary is documentation, and documentation is not evidence. A doc comment
+ * reading "a non-administrator is refused with 403" was once cited as the
+ * refusal itself.
+ */
+describe('comments are not evidence', () => {
+  function statusFinding(text: string, content: string) {
+    const criterion: AcceptanceCriterion = { id: 'REQ-1-AC-1', text, keyword: 'WHEN/THEN' };
+    const snippets: CodeSnippet[] = [{
+      filePath: 'src/thing.ts', content, startLine: 1, endLine: content.split('\n').length,
+      language: 'typescript',
+    }];
+    return runStaticChecks(criterion, snippets, '.').find(r => r.type === 'pattern');
+  }
+
+  const criterion = 'WHEN a caller is not the owner THEN the system SHALL return 403';
+
+  it('ignores a status code that only appears in a line comment', () => {
+    expect(statusFinding(criterion, '// refuse with 403 here\nreturn next();')?.found).toBe(false);
+  });
+
+  it('ignores a status code that only appears in a block comment', () => {
+    expect(statusFinding(criterion, '/**\n * refused with 403\n */\nreturn next();')?.found).toBe(false);
+  });
+
+  it('still accepts a status code in real code', () => {
+    expect(statusFinding(criterion, 'return res.status(403).send();')?.found).toBe(true);
+  });
+
+  it('treats a string literal as behaviour, not commentary', () => {
+    expect(statusFinding(criterion, "throw new Error('403 Forbidden');")?.found).toBe(true);
+  });
+
+  it('does not mistake a TypeScript private field for a comment', () => {
+    const masked = maskComments('class A { #count = 403; }', 'typescript');
+    expect(masked).toContain('403');
+  });
+
+  it('treats # as a comment in languages that use it', () => {
+    expect(maskComments('# returns 403\nx = 1', 'python')).not.toContain('403');
+  });
+
+  it('preserves line count so citations stay aligned', () => {
+    const source = 'a\n// 403\nb\n';
+    expect(maskComments(source, 'typescript').split('\n')).toHaveLength(source.split('\n').length);
+  });
+});
+
+/**
+ * Retrieval ranks by keyword overlap and a status code is one of those
+ * keywords, so a criterion requiring 403 on one route would retrieve an
+ * unrelated route that legitimately returns 403 and accept it as enforcement.
+ */
+describe('evidence is scoped to the endpoint the criterion names', () => {
+  const profileRoute: CodeSnippet = {
+    filePath: 'src/profile.ts',
+    content: "router.get('/profile/:id', (req, res) => res.status(200).json(account));",
+    startLine: 1, endLine: 1, language: 'typescript',
+  };
+  const accountsRoute: CodeSnippet = {
+    filePath: 'src/accounts.ts',
+    content: "router.delete('/accounts/:id', (req, res) => res.status(403).send());",
+    startLine: 1, endLine: 1, language: 'typescript',
+  };
+
+  it('does not accept a status code from an unrelated route', () => {
+    const criterion: AcceptanceCriterion = {
+      id: 'REQ-2-AC-2',
+      text: 'WHEN a signed-in user requests GET /profile/:id for an account they do not own THEN the system SHALL return 403',
+      keyword: 'WHEN/THEN',
+    };
+
+    const status = runStaticChecks(criterion, [profileRoute, accountsRoute], '.')
+      .find(result => result.type === 'pattern');
+
+    expect(status?.found).toBe(false);
+  });
+
+  it('accepts the status code when it is in the named route', () => {
+    const criterion: AcceptanceCriterion = {
+      id: 'REQ-6-AC-2',
+      text: 'WHEN a non-administrator requests DELETE /accounts/:id THEN the system SHALL return 403',
+      keyword: 'WHEN/THEN',
+    };
+
+    const status = runStaticChecks(criterion, [profileRoute, accountsRoute], '.')
+      .find(result => result.type === 'pattern');
+
+    expect(status?.found).toBe(true);
+    expect(status?.file).toBe('src/accounts.ts');
+  });
+
+  it('scopes to the snippets containing the named path', () => {
+    const scoped = scopeToSubject(
+      'WHEN a user requests GET /profile/:id THEN the system SHALL return 200',
+      [profileRoute, accountsRoute],
+    );
+
+    expect(scoped.map(s => s.filePath)).toEqual(['src/profile.ts']);
+  });
+
+  it('falls back to every snippet when no path is named', () => {
+    const scoped = scopeToSubject('The system SHALL return 403 when refused', [profileRoute, accountsRoute]);
+    expect(scoped).toHaveLength(2);
+  });
+
+  it('does not read prose like "and/or" as a route', () => {
+    const scoped = scopeToSubject('The system SHALL accept and/or reject', [profileRoute, accountsRoute]);
+    expect(scoped).toHaveLength(2);
   });
 });
 

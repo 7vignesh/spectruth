@@ -30,6 +30,10 @@ export function collectDiffHunks(
   for (const change of transition.changedFiles) {
     if (hunks.length >= maxHunks) break;
 
+    // Documentation and repository metadata are not evidence of behaviour, and
+    // their churn should not lift a criterion out of UNSUPPORTED.
+    if (!isImplementationFile(change.path)) continue;
+
     if (change.change === 'deleted') {
       hunks.push({
         file: change.path,
@@ -127,21 +131,47 @@ export async function collectSourceSnippets(
   codebasePath: string,
   maxPerCriterion: number,
 ): Promise<CodeSnippet[]> {
-  const allSnippets: CodeSnippet[] = [];
+  const { all } = await collectSnippetsByCriterion(criteria, codebasePath, maxPerCriterion);
+  return all;
+}
+
+/**
+ * Retrieve snippets and keep track of which criterion each one was found for.
+ *
+ * Retrieval is per-criterion, but flattening the results discarded that
+ * attribution, and the static checks then ran every criterion against the union
+ * of every file retrieved for every criterion. A criterion requiring a 403 on
+ * `GET /profile/:id` was satisfied by an unrelated 403 in the account-deletion
+ * route, which is a false completion claim of exactly the kind this tool exists
+ * to refuse.
+ */
+export async function collectSnippetsByCriterion(
+  criteria: AcceptanceCriterion[],
+  codebasePath: string,
+  maxPerCriterion: number,
+): Promise<{ all: CodeSnippet[]; byCriterion: Record<string, CodeSnippet[]> }> {
+  const all: CodeSnippet[] = [];
+  const byCriterion: Record<string, CodeSnippet[]> = {};
   const seen = new Set<string>();
 
   for (const criterion of criteria) {
     const result = await findRelevantCode(criterion, codebasePath, maxPerCriterion);
+    const scoped: CodeSnippet[] = [];
+
     for (const snippet of result.snippets) {
       if (!isImplementationFile(snippet.filePath)) continue;
+      scoped.push(snippet);
+
       const key = `${snippet.filePath}:${snippet.startLine}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      allSnippets.push(snippet);
+      all.push(snippet);
     }
+
+    byCriterion[criterion.id] = scoped;
   }
 
-  return allSnippets;
+  return { all, byCriterion };
 }
 
 /**
@@ -150,17 +180,40 @@ export async function collectSourceSnippets(
  * A README or spec that describes returning 403 must never be cited as proof
  * that the code returns 403 — that is precisely the false support this tool
  * exists to catch.
+ *
+ * Repository metadata is excluded for a related reason: a criterion about rate
+ * limiting was reported UNVERIFIED rather than UNSUPPORTED because `.gitignore`
+ * had changed, and a modified `.gitignore` is not an implementation. Dotfiles
+ * are also where secrets live, so they should not be quoted back in a report.
  */
 export function isImplementationFile(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+  const basename = normalized.split('/').pop() ?? normalized;
 
   if (normalized.endsWith('.md') || normalized.endsWith('.mdx')) return false;
   if (normalized.includes('.kiro/')) return false;
   if (normalized.includes('.spectruth/')) return false;
   if (normalized.startsWith('docs/') || normalized.includes('/docs/')) return false;
 
+  // Dotfiles are configuration or secrets, never the behaviour under audit.
+  if (basename.startsWith('.')) return false;
+
+  if (METADATA_FILES.has(basename)) return false;
+  if (basename.endsWith('.lock')) return false;
+
   return true;
 }
+
+const METADATA_FILES = new Set([
+  'license',
+  'licence',
+  'notice',
+  'codeowners',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lockb',
+]);
 
 // ─── Static Check Collector ──────────────────────────────────────────────────
 
@@ -169,15 +222,19 @@ export function isImplementationFile(filePath: string): boolean {
  */
 export function collectStaticFindings(
   criteria: AcceptanceCriterion[],
-  snippets: CodeSnippet[],
+  snippets: CodeSnippet[] | Record<string, CodeSnippet[]>,
   codebasePath: string,
 ): StaticFinding[] {
   const findings: StaticFinding[] = [];
+  const scoped = !Array.isArray(snippets);
 
   for (const criterion of criteria) {
-    const criterionSnippets = snippets.filter(snippet =>
-      snippet.content.length > 0,
-    );
+    // Only the snippets retrieved for this criterion. Passing the union let a
+    // status code from an unrelated route satisfy the criterion.
+    const criterionSnippets = scoped
+      ? snippets[criterion.id] ?? []
+      : snippets.filter(snippet => snippet.content.length > 0);
+
     const results = runStaticChecks(criterion, criterionSnippets, codebasePath);
     for (const result of results) {
       findings.push({

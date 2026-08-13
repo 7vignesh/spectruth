@@ -5,7 +5,7 @@
  * report is written to disk for the Agent Skill, repair previews, and re-audits.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import type { AuditReport } from '../types.js';
 import { SpecTruthError } from '../errors.js';
@@ -65,8 +65,7 @@ export function readReportForTask(
   projectRoot: string,
   specName: string,
   taskId: string,
-): AuditReport | undefined {
-  const path = join(
+): AuditReport | undefined {  const path = join(
     reportDirFor(projectRoot),
     `${sanitize(specName)}-${sanitize(`task-${taskId}`)}.json`,
   );
@@ -77,6 +76,42 @@ export function readReportForTask(
   } catch {
     return undefined; // A corrupt prior report must not block a fresh audit.
   }
+}
+
+/**
+ * Find the current stored report for a task without knowing its spec name.
+ *
+ * Used to detect a superseded approval: consent recorded against a report that
+ * a later audit has already replaced authorizes a gap that may no longer exist.
+ */
+export function findCurrentReportForTask(
+  projectRoot: string,
+  taskId: string,
+): AuditReport | undefined {
+  const dir = reportDirFor(projectRoot);
+  if (!existsSync(dir)) return undefined;
+
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return undefined;
+  }
+
+  for (const entry of entries) {
+    if (!entry.endsWith('.json') || entry === LATEST_REPORT_FILE) continue;
+
+    try {
+      const report = parseReportFile(join(dir, entry));
+      if (report.scope.kind === 'task' && report.scope.taskId === taskId) {
+        return report;
+      }
+    } catch {
+      continue; // A corrupt sibling report must not break the lookup.
+    }
+  }
+
+  return undefined;
 }
 
 function parseReportFile(path: string): AuditReport {
