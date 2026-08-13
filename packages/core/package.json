@@ -1,6 +1,6 @@
 {
   "name": "spectruth-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Done Integrity engine — audits whether a completed spec task is actually supported by evidence",
   "type": "module",
   "main": "./dist/index.js",
