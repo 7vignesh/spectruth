@@ -158,7 +158,7 @@ export {
   OpenAIProvider,
   KiroProvider,
 } from './verifier/provider.js';
-export { runStaticChecks } from './verifier/static-checks.js';
+export { runStaticChecks, FileReader } from './verifier/static-checks.js';
 export type { CheckStrength, StaticCheckResult } from './verifier/static-checks.js';
 
 export {

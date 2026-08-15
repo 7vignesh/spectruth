@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import type { AcceptanceCriterion, CodeSnippet, CompletedTaskTransition, EvidenceItem, FileChange } from '../types.js';
 import { findRelevantCode } from '../retriever/index.js';
-import { runStaticChecks } from '../verifier/static-checks.js';
+import { runStaticChecks, type StaticCheckResult, FileReader } from '../verifier/static-checks.js';
 import type { DiffHunk, StaticFinding } from './types.js';
 
 // ─── Git Diff Collector ──────────────────────────────────────────────────────
@@ -227,6 +227,7 @@ export function collectStaticFindings(
 ): StaticFinding[] {
   const findings: StaticFinding[] = [];
   const scoped = !Array.isArray(snippets);
+  const reader = new FileReader(codebasePath);
 
   for (const criterion of criteria) {
     // Only the snippets retrieved for this criterion. Passing the union let a
@@ -235,7 +236,7 @@ export function collectStaticFindings(
       ? snippets[criterion.id] ?? []
       : snippets.filter(snippet => snippet.content.length > 0);
 
-    const results = runStaticChecks(criterion, criterionSnippets, codebasePath);
+    const results = runStaticChecks(criterion, criterionSnippets, codebasePath, reader);
     for (const result of results) {
       findings.push({
         criterionId: criterion.id,

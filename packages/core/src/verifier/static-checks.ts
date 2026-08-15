@@ -105,6 +105,73 @@ function executableContent(snippet: CodeSnippet): string {
   return maskComments(snippet.content, snippet.language);
 }
 
+// ─── Full-File Reader ────────────────────────────────────────────────────────
+
+/**
+ * A searchable representation of a source file — the full text with comments
+ * masked, rather than the 50-line retrieval window.
+ *
+ * The retrieval window exists to bound what goes into a report and an LLM
+ * prompt. It has no business bounding a pattern search. A file can be 200 lines
+ * and the status code can sit on line 75 — a hard cap at 50 lines would report
+ * it missing while it is right there. Separating "what we search" from "what we
+ * display" fixes this without changing what the model or the report sees.
+ */
+interface Searchable {
+  filePath: string;
+  code: string;        // full file, comment-masked
+  language: string;
+}
+
+/**
+ * Memoizing reader that resolves a snippet's backing file exactly once per
+ * audit, masks comments over the whole thing, and returns it. Falls back to the
+ * snippet window if the file cannot be read (permissions, deletion between
+ * retrieval and check), so an IO error degrades rather than throws.
+ */
+export class FileReader {
+  private cache = new Map<string, Searchable | null>();
+
+  constructor(private codebasePath: string) {}
+
+  resolve(snippet: CodeSnippet): Searchable {
+    const cached = this.cache.get(snippet.filePath);
+    if (cached !== undefined) {
+      return cached ?? this.fallback(snippet);
+    }
+
+    const fullPath = join(this.codebasePath, snippet.filePath);
+    try {
+      const raw = readFileSync(fullPath, 'utf-8');
+      const searchable: Searchable = {
+        filePath: snippet.filePath,
+        code: maskComments(raw, snippet.language),
+        language: snippet.language,
+      };
+      this.cache.set(snippet.filePath, searchable);
+      return searchable;
+    } catch {
+      this.cache.set(snippet.filePath, null);
+      return this.fallback(snippet);
+    }
+  }
+
+  private fallback(snippet: CodeSnippet): Searchable {
+    return {
+      filePath: snippet.filePath,
+      code: maskComments(snippet.content, snippet.language),
+      language: snippet.language,
+    };
+  }
+}
+
+/** Find a line number in a full-file Searchable (1-indexed). */
+function findLine(searchable: Searchable, test: (line: string) => boolean): number | undefined {
+  const lines = searchable.code.split('\n');
+  const idx = lines.findIndex(test);
+  return idx >= 0 ? idx + 1 : undefined;
+}
+
 /**
  * How much a check can prove.
  *
@@ -132,47 +199,46 @@ export interface StaticCheckResult {
 /**
  * Run deterministic static checks against the codebase for a criterion.
  * Returns any evidence found without needing an LLM.
+ *
+ * When a `FileReader` is supplied (recommended), checks scan the full masked
+ * file rather than just the 50-line retrieval window. The window caps what goes
+ * into the report and LLM prompt; it should never cap a pattern search, because
+ * evidence past line 50 of a file would be reported as absent while it exists.
  */
 export function runStaticChecks(
   criterion: AcceptanceCriterion,
   snippets: CodeSnippet[],
   codebasePath: string,
+  reader?: FileReader,
 ): StaticCheckResult[] {
   const results: StaticCheckResult[] = [];
   const text = criterion.text.toLowerCase();
+  const r = reader ?? new FileReader(codebasePath);
 
-  // Restrict evidence to the endpoint the criterion names. Retrieval ranks by
-  // keyword overlap, and a status code is one of those keywords, so a criterion
-  // requiring 403 on GET /profile/:id would retrieve the unrelated route that
-  // legitimately returns 403 and accept it as enforcement.
-  const scoped = scopeToSubject(criterion.text, snippets);
+  // Restrict evidence to the endpoint the criterion names.
+  const scoped = scopeToSubject(criterion.text, snippets, r);
 
-  // Ordered from most to least specific to the criterion. Reporting cites the
-  // first supporting evidence it finds, and a status code names the behaviour
-  // being required far more precisely than the presence of a route does.
-  const statusCheck = checkStatusCode(criterion.text, scoped);
+  // Resolve full files for each scoped snippet.
+  const files = scoped.map(snippet => r.resolve(snippet));
+
+  const statusCheck = checkStatusCode(criterion.text, files);
   if (statusCheck) results.push(statusCheck);
 
-  // A criterion that names an algorithm or library is making a checkable claim
-  // about *how* the behaviour is implemented, not merely that it exists.
-  const techniqueCheck = checkNamedTechnique(criterion.text, scoped, codebasePath);
+  const techniqueCheck = checkNamedTechnique(criterion.text, files, codebasePath);
   if (techniqueCheck) results.push(techniqueCheck);
 
-  const limitCheck = checkNumericLimit(criterion.text, scoped);
+  const limitCheck = checkNumericLimit(criterion.text, files);
   if (limitCheck) results.push(limitCheck);
 
-  const routeCheck = checkRouteExistence(text, scoped);
+  const routeCheck = checkRouteExistence(text, files);
   if (routeCheck) results.push(routeCheck);
 
-  // Check for dependency mentions
   const depCheck = checkDependency(text, codebasePath);
   if (depCheck) results.push(depCheck);
 
-  // Check for test file existence
   const testCheck = checkTestExists(text, scoped, codebasePath);
   if (testCheck) results.push(testCheck);
 
-  // Check for environment variable
   const envCheck = checkEnvVariable(text, codebasePath);
   if (envCheck) results.push(envCheck);
 
@@ -182,23 +248,19 @@ export function runStaticChecks(
 /**
  * Narrow snippets to those implementing the endpoint the criterion names.
  *
- * Requirements in a Kiro spec name their subject: "GET /profile/:id", "POST
- * /register". When they do, evidence for that criterion has to come from the
- * handler for that path — a 403 in the account-deletion route says nothing
- * about whether the profile route refuses a non-owner.
- *
- * Falls back to the unnarrowed set when no path is named or no snippet contains
- * it, so a retrieval miss cannot manufacture a false absence.
+ * Uses full-file content for the match, so a route definition past the 50-line
+ * window still scopes correctly.
  */
 export function scopeToSubject(
   criterionText: string,
   snippets: CodeSnippet[],
+  reader?: FileReader,
 ): CodeSnippet[] {
   const anchors = routeAnchors(criterionText);
   if (anchors.length === 0) return snippets;
 
   const matching = snippets.filter(snippet => {
-    const code = executableContent(snippet);
+    const code = reader ? reader.resolve(snippet).code : maskComments(snippet.content, snippet.language);
     return anchors.some(anchor => code.includes(anchor));
   });
 
@@ -233,7 +295,7 @@ const PROSE_SLASH_WORDS = new Set(['or', 'and', 'not', 'no', 'off', 'on']);
  * This is corroborating evidence only. It proves an endpoint exists, never
  * that the endpoint does what the criterion requires.
  */
-function checkRouteExistence(text: string, snippets: CodeSnippet[]): StaticCheckResult | null {
+function checkRouteExistence(text: string, files: Searchable[]): StaticCheckResult | null {
   // Extract HTTP methods and paths from criterion
   const httpMethods = ['get', 'post', 'put', 'patch', 'delete'];
   // Matched on a word boundary: "budget" and "target" are not GET requests.
@@ -243,27 +305,24 @@ function checkRouteExistence(text: string, snippets: CodeSnippet[]): StaticCheck
 
   if (!mentionedMethod) return null;
 
-  // Look for route definition in snippets
+  // Look for route definition in files
   const routePatterns = [
     new RegExp(`router\\.(${mentionedMethod}|${mentionedMethod.toUpperCase()})`, 'i'),
     new RegExp(`app\\.(${mentionedMethod}|${mentionedMethod.toUpperCase()})`, 'i'),
     new RegExp(`@(${mentionedMethod}|${mentionedMethod.charAt(0).toUpperCase() + mentionedMethod.slice(1)})`, 'i'),
   ];
 
-  for (const snippet of snippets) {
-    const code = executableContent(snippet);
+  for (const file of files) {
     for (const pattern of routePatterns) {
-      if (pattern.test(code)) {
-        // Cite the line the route is actually on, not the snippet start.
-        const lines = code.split('\n');
-        const lineIdx = lines.findIndex(line => pattern.test(line));
+      if (pattern.test(file.code)) {
+        const line = findLine(file, l => pattern.test(l));
         return {
           type: 'route',
           found: true,
           strength: 'corroborating',
           detail: `Found ${mentionedMethod.toUpperCase()} route definition`,
-          file: snippet.filePath,
-          line: snippet.startLine + (lineIdx >= 0 ? lineIdx : 0),
+          file: file.filePath,
+          line,
         };
       }
     }
@@ -280,25 +339,22 @@ function checkRouteExistence(text: string, snippets: CodeSnippet[]): StaticCheck
 /**
  * Check if a status code mentioned in the criterion appears in the code.
  */
-function checkStatusCode(text: string, snippets: CodeSnippet[]): StaticCheckResult | null {
+function checkStatusCode(text: string, files: Searchable[]): StaticCheckResult | null {
   const statusMatch = text.match(/\b([1-5]\d{2})\b/);
   if (!statusMatch) return null;
 
   const statusCode = statusMatch[1];
 
-  for (const snippet of snippets) {
-    const code = executableContent(snippet);
-    if (code.includes(statusCode)) {
-      // Find the specific line
-      const lines = code.split('\n');
-      const lineIdx = lines.findIndex(l => l.includes(statusCode));
+  for (const file of files) {
+    if (file.code.includes(statusCode)) {
+      const line = findLine(file, l => l.includes(statusCode));
       return {
         type: 'pattern',
         found: true,
         strength: 'specific',
         detail: `Status code ${statusCode} found in code`,
-        file: snippet.filePath,
-        line: snippet.startLine + (lineIdx >= 0 ? lineIdx : 0),
+        file: file.filePath,
+        line,
       };
     }
   }
@@ -320,27 +376,25 @@ function checkStatusCode(text: string, snippets: CodeSnippet[]): StaticCheckResu
  */
 function checkNamedTechnique(
   text: string,
-  snippets: CodeSnippet[],
+  files: Searchable[],
   codebasePath: string,
 ): StaticCheckResult | null {
   const named = NAMED_TECHNIQUES.find(technique => technique.term.test(text));
   if (!named) return null;
 
-  for (const snippet of snippets) {
-    const code = executableContent(snippet);
+  for (const file of files) {
     for (const token of named.tokens) {
       const pattern = new RegExp(`\\b${escapeRegExp(token)}`, 'i');
-      if (!pattern.test(code)) continue;
+      if (!pattern.test(file.code)) continue;
 
-      const lines = code.split('\n');
-      const lineIdx = lines.findIndex(line => pattern.test(line));
+      const line = findLine(file, l => pattern.test(l));
       return {
         type: 'technique',
         found: true,
         strength: 'specific',
         detail: `${named.label} referenced in code`,
-        file: snippet.filePath,
-        line: snippet.startLine + (lineIdx >= 0 ? lineIdx : 0),
+        file: file.filePath,
+        line,
       };
     }
   }
@@ -368,7 +422,7 @@ function checkNamedTechnique(
 /**
  * Check a numeric bound the criterion states, such as "at most 50 per page".
  */
-function checkNumericLimit(text: string, snippets: CodeSnippet[]): StaticCheckResult | null {
+function checkNumericLimit(text: string, files: Searchable[]): StaticCheckResult | null {
   const match = text.match(
     /\b(?:at most|no more than|maximum of|up to|limited to|cap(?:ped)? at)\s+(\d+)\b/i,
   );
@@ -376,20 +430,18 @@ function checkNumericLimit(text: string, snippets: CodeSnippet[]): StaticCheckRe
 
   const limit = match[1];
 
-  for (const snippet of snippets) {
-    const code = executableContent(snippet);
+  for (const file of files) {
     const pattern = new RegExp(`\\b${limit}\\b`);
-    if (!pattern.test(code)) continue;
+    if (!pattern.test(file.code)) continue;
 
-    const lines = code.split('\n');
-    const lineIdx = lines.findIndex(line => pattern.test(line));
+    const line = findLine(file, l => pattern.test(l));
     return {
       type: 'limit',
       found: true,
       strength: 'specific',
       detail: `Limit ${limit} found in code`,
-      file: snippet.filePath,
-      line: snippet.startLine + (lineIdx >= 0 ? lineIdx : 0),
+      file: file.filePath,
+      line,
     };
   }
 
