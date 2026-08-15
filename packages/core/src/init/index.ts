@@ -194,16 +194,54 @@ const AGENT = {
     "SpecTruth ready. Ask me whether a task is actually done and I'll audit the evidence behind the claim. Repairs always require your explicit approval.",
 };
 
+/**
+ * Paired task hooks, in Kiro's `.kiro/hooks/*.json` v1 schema.
+ *
+ * `PreTaskExec` fires when a spec task's status changes to in_progress and
+ * `PostTaskExec` when it changes to completed, which is exactly the pairing a
+ * Done Integrity gate needs: snapshot before, audit after.
+ *
+ * These files previously used a `when`/`then` structure with
+ * `preTaskExecution` / `postTaskExecution`. Those were the real IDE 0.x trigger
+ * names, but 0.x read hooks from `.kiro.hook` files — so 0.x content sitting at
+ * a 1.0 path could not load on either version, and the hooks silently never
+ * fired. Kiro's own migration table renames them to `PreTaskExec` /
+ * `PostTaskExec` and replaces `when`/`then` with `trigger`/`action`.
+ *
+ * A command action's exit code carries meaning: `0` puts stdout into the
+ * agent's context, and any other non-zero is reported as a hook error. That is
+ * why a BLOCKED ship decision exits `0` — the summary is the payload, and a
+ * blocked ship is the tool working rather than failing.
+ *
+ * The post-task timeout is raised above Kiro's 60s default because an audit
+ * over a large repository can legitimately take longer.
+ */
 const PRE_HOOK = {
-  name: 'SpecTruth Pre-Task Snapshot',
-  version: '1.0.0',
-  when: { type: 'preTaskExecution' },
-  then: { type: 'runCommand', command: 'npx spectruth pre-task' },
+  version: 'v1',
+  hooks: [
+    {
+      name: 'SpecTruth Pre-Task Snapshot',
+      description:
+        'Captures task states, git state and file fingerprints before Kiro works on a spec task, so the completed task can be identified afterwards.',
+      trigger: 'PreTaskExec',
+      action: { type: 'command', command: 'npx spectruth pre-task' },
+      timeout: 60,
+      enabled: true,
+    },
+  ],
 };
 
 const POST_HOOK = {
-  name: 'SpecTruth Post-Task Audit',
-  version: '1.0.0',
-  when: { type: 'postTaskExecution' },
-  then: { type: 'runCommand', command: 'npx spectruth post-task' },
+  version: 'v1',
+  hooks: [
+    {
+      name: 'SpecTruth Post-Task Audit',
+      description:
+        'Audits the task that just became complete against the acceptance criteria it references, and prints the ship decision into the agent context.',
+      trigger: 'PostTaskExec',
+      action: { type: 'command', command: 'npx spectruth post-task' },
+      timeout: 120,
+      enabled: true,
+    },
+  ],
 };

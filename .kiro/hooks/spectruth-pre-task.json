@@ -1,9 +1,16 @@
 {
-  "name": "SpecTruth Pre-Task Snapshot",
-  "version": "1.0.0",
-  "when": { "type": "preTaskExecution" },
-  "then": {
-    "type": "runCommand",
-    "command": "node packages/cli/dist/index.js pre-task"
-  }
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "SpecTruth Pre-Task Snapshot",
+      "description": "Captures task states, git state and file fingerprints before Kiro works on a spec task, so the completed task can be identified afterwards.",
+      "trigger": "PreTaskExec",
+      "action": {
+        "type": "command",
+        "command": "node packages/cli/dist/index.js pre-task"
+      },
+      "timeout": 60,
+      "enabled": true
+    }
+  ]
 }

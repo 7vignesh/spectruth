@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { join, resolve } from 'path';
+import { runInit } from '../init/index.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..', '..', '..');
 const KIRO = join(REPO_ROOT, '.kiro');
@@ -9,34 +11,68 @@ function readJson(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, 'utf-8'));
 }
 
-interface HookDocument {
+/** One hook definition inside a `.kiro/hooks/*.json` file. */
+interface HookDefinition {
   name: string;
+  description?: string;
+  trigger: string;
+  matcher?: string;
+  action: { type: string; command?: string; prompt?: string };
+  timeout?: number;
+  enabled?: boolean;
+}
+
+interface HookDocument {
   version: string;
-  when: { type: string };
-  then: { type: string; command: string };
+  hooks: HookDefinition[];
+}
+
+/**
+ * Every trigger name Kiro accepts. A hook naming anything else is inert: Kiro
+ * loads the file, matches no trigger, and stays silent about it.
+ */
+const KIRO_TRIGGERS = new Set([
+  'SessionStart',
+  'Stop',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'PostFileCreate',
+  'PostFileSave',
+  'PostFileDelete',
+  'PreTaskExec',
+  'PostTaskExec',
+]);
+
+function readHookDocument(path: string): HookDocument {
+  return JSON.parse(readFileSync(path, 'utf-8')) as HookDocument;
+}
+
+function onlyHook(document: HookDocument): HookDefinition {
+  return document.hooks[0];
 }
 
 describe('paired Kiro task hooks', () => {
-  const pre = readJson(join(KIRO, 'hooks', 'spectruth-pre-task.json')) as unknown as HookDocument;
-  const post = readJson(join(KIRO, 'hooks', 'spectruth-post-task.json')) as unknown as HookDocument;
+  const pre = readHookDocument(join(KIRO, 'hooks', 'spectruth-pre-task.json'));
+  const post = readHookDocument(join(KIRO, 'hooks', 'spectruth-post-task.json'));
 
   it('removes the obsolete generic verification hook', () => {
     expect(existsSync(join(KIRO, 'hooks', 'spectruth-verify.json'))).toBe(false);
   });
 
-  it('registers preTaskExecution for snapshot capture', () => {
-    expect(pre.when.type).toBe('preTaskExecution');
-    expect(pre.then.command).toMatch(/\bpre-task\b/);
+  it('registers PreTaskExec for snapshot capture', () => {
+    expect(onlyHook(pre).trigger).toBe('PreTaskExec');
+    expect(onlyHook(pre).action.command).toMatch(/\bpre-task\b/);
   });
 
-  it('registers postTaskExecution for the completion audit', () => {
-    expect(post.when.type).toBe('postTaskExecution');
-    expect(post.then.command).toMatch(/\bpost-task\b/);
+  it('registers PostTaskExec for the completion audit', () => {
+    expect(onlyHook(post).trigger).toBe('PostTaskExec');
+    expect(onlyHook(post).action.command).toMatch(/\bpost-task\b/);
   });
 
   it('invokes a command that resolves in this workspace', () => {
     for (const document of [pre, post]) {
-      expect(document.then.command).toContain('node packages/cli/dist/index.js');
+      expect(onlyHook(document).action.command).toContain('node packages/cli/dist/index.js');
     }
   });
 
@@ -45,20 +81,102 @@ describe('paired Kiro task hooks', () => {
     expect(existsSync(entry)).toBe(true);
   });
 
-  it('uses the correct Kiro hook schema with when/then', () => {
+  it('uses the v1 hook schema Kiro documents', () => {
     for (const document of [pre, post]) {
-      expect(document.version).toBe('1.0.0');
-      expect(document.then.type).toBe('runCommand');
-      expect(document).not.toHaveProperty('hooks');
-      expect(document).not.toHaveProperty('trigger');
+      expect(document.version).toBe('v1');
+      expect(Array.isArray(document.hooks)).toBe(true);
+      expect(document.hooks.length).toBeGreaterThan(0);
+      expect(onlyHook(document).action.type).toBe('command');
+      expect(onlyHook(document).name.length).toBeGreaterThan(0);
     }
+  });
+
+  /**
+   * These files once paired IDE 0.x content — a `when`/`then` structure with
+   * `preTaskExecution` — with the 1.0 `.kiro/hooks/*.json` location. 0.x read
+   * hooks from `.kiro.hook` files, so neither version could load them and the
+   * hooks silently never fired while a passing test asserted the absence of the
+   * `trigger` field. This test exists so that cannot recur quietly.
+   */
+  it('carries no trace of the legacy 0.x hook structure', () => {
+    for (const document of [pre, post]) {
+      expect(document).not.toHaveProperty('when');
+      expect(document).not.toHaveProperty('then');
+      expect(document.version).not.toBe('1.0.0');
+
+      const serialized = JSON.stringify(document);
+      expect(serialized).not.toContain('preTaskExecution');
+      expect(serialized).not.toContain('postTaskExecution');
+      expect(serialized).not.toContain('runCommand');
+    }
+  });
+
+  it('names only triggers that exist in Kiro', () => {
+    for (const document of [pre, post]) {
+      const { trigger } = onlyHook(document);
+      expect(KIRO_TRIGGERS.has(trigger), `unknown trigger: ${trigger}`).toBe(true);
+    }
+  });
+
+  it('allows the post-task audit longer than Kiro default timeout', () => {
+    // An audit over a large repository can exceed the 60s default; a snapshot
+    // cannot, so only the post-task hook is raised.
+    expect(onlyHook(post).timeout ?? 60).toBeGreaterThan(60);
   });
 
   it('does not run the obsolete verify command or glob a spec file', () => {
     for (const document of [pre, post]) {
-      expect(document.then.command).not.toContain('verify');
-      expect(document.then.command).not.toContain('*');
+      expect(onlyHook(document).action.command).not.toContain('verify');
+      expect(onlyHook(document).action.command).not.toContain('*');
     }
+  });
+});
+
+/**
+ * The templates written into other people's projects and this repository's own
+ * hooks drifted apart before, so they are compared rather than trusted.
+ */
+describe('shipped init hook templates', () => {
+  let root: string;
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'spectruth-init-hooks-'));
+    runInit({ projectRoot: root });
+  });
+
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('writes both task hooks', () => {
+    for (const file of ['spectruth-pre-task.json', 'spectruth-post-task.json']) {
+      expect(existsSync(join(root, '.kiro', 'hooks', file))).toBe(true);
+    }
+  });
+
+  it('emits the same schema as this repository uses', () => {
+    const scaffolded = [
+      readHookDocument(join(root, '.kiro', 'hooks', 'spectruth-pre-task.json')),
+      readHookDocument(join(root, '.kiro', 'hooks', 'spectruth-post-task.json')),
+    ];
+
+    for (const document of scaffolded) {
+      expect(document.version).toBe('v1');
+      expect(document.hooks.length).toBe(1);
+      expect(onlyHook(document).action.type).toBe('command');
+      expect(KIRO_TRIGGERS.has(onlyHook(document).trigger)).toBe(true);
+      expect(document).not.toHaveProperty('when');
+      expect(document).not.toHaveProperty('then');
+    }
+
+    expect(onlyHook(scaffolded[0]).trigger).toBe('PreTaskExec');
+    expect(onlyHook(scaffolded[1]).trigger).toBe('PostTaskExec');
+  });
+
+  it('invokes the published package rather than a workspace path', () => {
+    // A scaffolded project has no packages/cli/dist to run.
+    const scaffolded = readHookDocument(join(root, '.kiro', 'hooks', 'spectruth-pre-task.json'));
+    expect(onlyHook(scaffolded).action.command).toBe('npx spectruth pre-task');
   });
 });
 
