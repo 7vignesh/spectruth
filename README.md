@@ -319,11 +319,16 @@ project being audited.
 
 ## Honest limitations
 
-- **The paired hooks do not fire automatically in the current Kiro IDE.** The
-  configuration uses the documented `preTaskExecution` / `postTaskExecution`
-  schema, but IDE task execution delegates to an internal subagent and does not
-  invoke external hooks. SpecTruth is therefore agent-initiated: you ask, it
-  audits. The hooks are shipped and will work if those triggers activate.
+- **The paired hooks do not fire automatically in the current Kiro IDE.** They
+  use Kiro's documented `PreTaskExec` and `PostTaskExec` triggers in the current
+  `.kiro/hooks/*.json` schema, and both are documented as IDE-only. They still
+  do not fire, because IDE spec task execution delegates to an internal
+  spec-task-execution subagent, and Kiro documents that hooks do not trigger in
+  subagents ([kirodotdev/Kiro#7755](https://github.com/kirodotdev/Kiro/issues/7755)).
+  Confirmed by running a task to completion in the IDE: the task moved to
+  `[x]`, the subagent wrote code, and no snapshot or report was produced.
+  SpecTruth is therefore agent-initiated: you ask, it audits. The hooks ship in
+  the correct schema and will work if that behaviour changes.
 - **Deterministic checks are pattern-based.** They detect concrete signals such
   as status codes, route definitions and auth keywords. They are strong at
   catching *absence* and weaker at catching a *wrong* implementation.

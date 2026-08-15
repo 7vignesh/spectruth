@@ -105,14 +105,36 @@ promote them to dependencies.
 
 ## Kiro integration — what actually happens
 
-The paired hooks use Kiro's documented `preTaskExecution` / `postTaskExecution`
-schema with `when`/`then`. **They do not fire.** IDE task execution delegates to
-an internal spec-task-execution subagent and never invokes external hooks. This
-was verified empirically; see `docs/kiro-integration-spike.md`.
+The paired hooks use Kiro's `PreTaskExec` and `PostTaskExec` triggers in the
+`.kiro/hooks/*.json` v1 schema. Both are documented as **IDE-only** — they do not
+exist in the CLI, so nothing about them can be tested with `kiro-cli`.
+
+**They do not fire.** IDE spec task execution delegates to an internal
+spec-task-execution subagent, and Kiro documents that hooks do not trigger in
+subagents ([kirodotdev/Kiro#7755](https://github.com/kirodotdev/Kiro/issues/7755)).
+Verified by running task 10 of `demo-project` to completion in the IDE: the
+transcript showed "Delegating the implementation of task 10 to the
+spec-task-execution subagent", the task moved to `[x]`, three source files were
+written, and no `.spectruth/` directory was created at all — no snapshot, no
+report, and no hook error.
+
+That test is only meaningful because the schema was correct when it ran. An
+earlier version of these files paired IDE 0.x content — a `when`/`then` structure
+naming `preTaskExecution` / `postTaskExecution` — with the 1.0 file location.
+0.x read hooks from `.kiro.hook` files, so no Kiro version could load them, and
+the same conclusion had been drawn from a config Kiro never parsed. Do not
+"simplify" the hook files back toward that shape; there is a test asserting the
+v1 schema and rejecting every legacy token.
 
 Consequence: SpecTruth is **agent-initiated**, not automatic. The user asks, the
 agent runs `npx spectruth audit --json` and explains the result. That is the
 intended UX, not a workaround. Do not write copy claiming automatic auditing.
+
+Worth knowing for a future attempt: Kiro treats exit code `2` from a command hook
+as a *block* on `PreTaskExec`, `PreToolUse` and `UserPromptSubmit`. If task hooks
+ever fire, SpecTruth could refuse to let a task start. Exit `0` puts stdout into
+the agent's context and any other non-zero is reported as a hook error, which is
+exactly why a `BLOCKED` decision exits `0`.
 
 What *does* work, verified in the IDE: the Agent Skill loads via `skill://`, the
 custom agent runs the CLI, and it reads and explains reports correctly.
@@ -162,7 +184,18 @@ output `dist`. Not yet deployed.
    typed and explained" describes the library, not the shipped CLI path. Wiring
    a real gate means either a `repair --apply` command or a pre-write check in
    the agent contract; both are design decisions, not cleanups.
-1. **Deploy the landing page.** The hackathon organizer said judges expect to run
+1. **Static checks only see the retrieved window, so a match past it reads as
+   absent.** `extractSnippets` caps a snippet at 50 lines and keeps only the
+   single best range per file, so a criterion's evidence can sit in the file and
+   still be reported missing. Found when Kiro inserted a new endpoint above an
+   existing route in `demo-project`: the `204` moved from line 46 to line 75, the
+   retrieved window was lines 1–50, and `REQ-6-AC-1` flipped to `UNSUPPORTED`
+   with the code unchanged and correct. This is a false negative rather than a
+   false green, so it cries wolf rather than waving work through — but it is
+   still wrong, and it is load-bearing for any file over ~50 lines. The fix is
+   either multiple windows per file or scanning the whole file for the specific
+   pattern once retrieval has selected the file.
+2. **Deploy the landing page.** The hackathon organizer said judges expect to run
    submissions, "preferably live."
 2. **Record the walkthrough video** and fill the placeholder.
 3. **Capture the four Kiro screenshots.**
