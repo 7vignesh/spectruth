@@ -537,7 +537,7 @@ function checkDependency(text: string, codebasePath: string): StaticCheckResult 
         return {
           type: 'dependency',
           found: true,
-          strength: 'specific',
+          strength: 'corroborating',
           detail: `Dependency "${dep}" found in package.json`,
           file: 'package.json',
         };
@@ -547,7 +547,7 @@ function checkDependency(text: string, codebasePath: string): StaticCheckResult 
     return {
       type: 'dependency',
       found: false,
-      strength: 'specific',
+      strength: 'corroborating',
       detail: `No relevant dependency found (expected one of: ${relevantDeps.slice(0, 3).join(', ')})`,
       file: 'package.json',
     };

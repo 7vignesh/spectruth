@@ -245,15 +245,20 @@ function adjudicateDeterministically(
       `Only corroborating evidence was found (${found.map(f => f.detail).join('; ')}). `
       + 'It establishes where the behavior would live but not that the behavior is implemented.';
   } else if (missing.some(f => f.strength === 'specific')) {
-    // A specific check that ran and found nothing is a demonstrated absence,
-    // not an unknown. Unrelated file churn previously lifted this to
-    // UNVERIFIED, which reported a missing rate limit as merely unproven.
+    // A specific check that ran and found nothing is a demonstrated absence
+    // only when it tested something the criterion explicitly names — a status
+    // code, a named algorithm, a stated limit. These checks fire on exact
+    // textual matches in the criterion, not heuristic keyword overlap.
+    const specificMissing = missing.filter(f => f.strength === 'specific');
     state = 'UNSUPPORTED';
     justification =
-      `The criterion requires behavior that is demonstrably absent: ${missing.map(f => f.detail).join('; ')}.`;
+      `The criterion requires behavior that is demonstrably absent: ${specificMissing.map(f => f.detail).join('; ')}.`;
   } else if (hasSource || hasChanges) {
+    // Relevant code exists but no check could prove the required behavior.
+    // This is the honest "I don't know" state — not absent, just unproven.
+    // The agent adjudicates these by reading the source itself.
     state = 'UNVERIFIED';
-    justification = 'Relevant source or file changes exist, but deterministic checks cannot confirm the required behavior without an LLM provider.';
+    justification = 'Relevant source exists, but deterministic checks cannot confirm the required behavior. Agent adjudication is needed.';
   } else {
     state = 'UNSUPPORTED';
     justification = 'No implementation evidence was found for this criterion.';
