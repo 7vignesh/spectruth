@@ -1,15 +1,25 @@
 ---
 name: spectruth
-description: Explains SpecTruth Done Integrity audits for Kiro spec tasks. Use when a task was marked complete and you need the ship decision, the evidence behind it, why a task is blocked, or a repair preview that requires explicit approval before anything changes.
+description: Done Integrity ship gate for Kiro spec tasks — checks whether a completed task is actually supported by evidence, and never repairs anything without explicit approval. Use when a task was marked complete and you need the ship decision, when you want to verify work is done, why something is blocked, or when a repair preview requires explicit approval before anything changes.
 ---
 
 # SpecTruth — Done Integrity
 
-SpecTruth answers one question: **when Kiro marks a spec task complete, does the
-available evidence support that completion claim?**
+SpecTruth answers one question: **when a task is marked complete, does the
+available evidence support that claim?**
 
-It never edits `tasks.md`, never repairs code on its own, and never treats a
-missing test suite as a failure.
+It works in two layers:
+
+1. **Evidence collection** — the CLI scans the repository deterministically
+   (status codes, named libraries, route definitions, numeric limits). Free,
+   instant, reproducible.
+2. **Agent adjudication** — for any criterion the CLI cannot prove, you read the
+   source yourself and apply the rules below. You are the reasoning layer; the
+   CLI is the evidence layer.
+
+Together they cover every criterion: simple textual patterns are caught without
+a model, and complex behaviour ("persist then enqueue") is adjudicated by you
+using the model the user already has.
 
 ## Evidence states
 
@@ -18,95 +28,123 @@ missing test suite as a failure.
 | `SUPPORTED` | Evidence demonstrates the complete criterion |
 | `PARTIAL` | Evidence demonstrates only part of the criterion |
 | `UNSUPPORTED` | Implementation is absent, contradicted, or demonstrably incomplete |
-| `UNVERIFIED` | Implementation may exist, but evidence cannot establish the behavior |
+| `UNVERIFIED` | The CLI could not establish this; agent adjudication is required |
 
 ## Ship decisions
 
 | Decision | Rule |
 |---|---|
 | `BLOCKED` | Any `UNSUPPORTED` or any `PARTIAL` finding |
-| `REVIEW_REQUIRED` | No blocking findings, but at least one `UNVERIFIED` |
+| `REVIEW_REQUIRED` | No blocking findings, but at least one criterion still `UNVERIFIED` after adjudication |
 | `READY` | Every linked criterion is `SUPPORTED` |
 
-A missing authorization, ownership, permission, credential, or encryption check
-is `UNSUPPORTED` and therefore `BLOCKED`. It is never softened to `UNVERIFIED`.
+## Security rule — non-negotiable
 
-## Commands
+A missing authorization, ownership, permission, credential, encryption, or
+authentication check is **always `UNSUPPORTED`**, never `UNVERIFIED`. Partial
+enforcement of a security requirement is also `UNSUPPORTED` — half an ownership
+check protects nothing. This rule applies to both CLI evidence and your own
+adjudication.
 
-The CLI is not published yet, so it runs from the built entry point. Build once
-with `cd packages/core; npx tsc` then `cd ../cli; npx tsc`.
+## The two-layer flow
 
-The primary command needs no snapshot and is what you should normally run:
-
-```bash
-node packages/cli/dist/index.js audit --json                 # every completed task
-node packages/cli/dist/index.js audit --task 3.2 --json      # one task
-node packages/cli/dist/index.js audit --deterministic --json # no LLM adjudication
-```
-
-Repair protocol:
+### Step 1: Run the CLI
 
 ```bash
-node packages/cli/dist/index.js preview --report <reportId> --json
-node packages/cli/dist/index.js approve --report <reportId> --preview <previewId>
+npx spectruth audit --json              # all completed tasks
+npx spectruth audit --task 3.2 --json   # one specific task
 ```
 
-Reading a previous result, and the paired hooks:
+The CLI returns a JSON report with a verdict per criterion. Many will be
+`SUPPORTED` or `UNSUPPORTED` — those are final. Some will be `UNVERIFIED` —
+those are yours to adjudicate.
+
+### Step 2: Adjudicate UNVERIFIED criteria
+
+For each criterion the CLI marked `UNVERIFIED`:
+
+1. Read the criterion text. Understand exactly what it requires.
+2. Read the relevant source files. Use `read`, `grep`, `glob` to find the
+   implementation.
+3. Apply the evidence states strictly:
+   - Does the code **demonstrably** do what the criterion says? → `SUPPORTED`
+   - Does it do **part** of it but not all? → `PARTIAL`
+   - Is the implementation **absent, contradicted, or clearly incomplete**? → `UNSUPPORTED`
+   - Can you genuinely not determine it from available evidence? → leave as `UNVERIFIED`
+4. For every verdict you produce, **cite the evidence**:
+   - File path and line range
+   - What you observed in the code
+   - Why it satisfies (or does not satisfy) the criterion
+
+### What you must NOT do during adjudication
+
+- Never invent evidence. Only cite files you actually read.
+- Never override a CLI `UNSUPPORTED` verdict. If the CLI proved something is
+  absent, it is absent. You may only resolve `UNVERIFIED`.
+- Never use confidence values, percentages, or binary verdicts.
+- Never treat documentation (README, comments, spec files) as implementation
+  evidence. Comments describe intent; code demonstrates behaviour.
+- Never soften a security gap. Missing auth is `UNSUPPORTED`, period.
+
+## How to respond to the user
+
+1. Run `npx spectruth audit --json` (add `--task <id>` when they named one).
+2. For each `UNVERIFIED` criterion, perform adjudication as described above.
+3. Lead with the **final ship decision** after adjudication.
+4. Present findings grouped by task:
+   - State each criterion's final verdict (after your adjudication).
+   - For CLI-resolved criteria: quote the CLI's finding briefly.
+   - For agent-adjudicated criteria: state what you read, where, and why you
+     assigned the state. Cite file and line.
+5. If the ship decision is `BLOCKED`, name the specific gaps that block it.
+6. If the audit skipped tasks with no `_Requirements:_` reference, say so.
+
+### Example response format
+
+```
+SHIP DECISION: BLOCKED
+
+Task 2 — Enforce profile ownership
+
+  REQ-2-AC-1  SUPPORTED (CLI)
+    src/profile.ts:37 — status 200 found in code
+
+  REQ-2-AC-2  UNSUPPORTED (agent-adjudicated)
+    The criterion requires returning 403 when a user requests a profile
+    they don't own. I read src/profile.ts:18-42. The route verifies the
+    JWT token (line 22) but never compares the token subject with
+    req.params.id. Any authenticated user can read any profile.
+    Missing: ownership comparison and 403 refusal.
+```
+
+## Repairs require explicit approval
+
+When the user asks you to fix a blocked finding:
+
+1. Show the repair preview: the criterion, the gap, what you would change, and
+   the evidence expected afterwards.
+2. State plainly: **"Nothing has been changed."**
+3. Ask for approval and **stop**. Wait for a separate reply.
+4. Once approved, implement **only** the authorized scope.
+5. **Never modify `tasks.md`**. Never mark a task complete.
+6. After implementing, re-run `npx spectruth audit --task <id> --json` and
+   re-adjudicate. Report honestly whether the gap closed.
+
+An approval covers one repair for one criterion. If the findings change, ask
+again.
+
+## Commands reference
 
 ```bash
-node packages/cli/dist/index.js report --json     # most recent report
-node packages/cli/dist/index.js pre-task          # snapshot before work starts
-node packages/cli/dist/index.js post-task         # audit an observed transition
+npx spectruth audit --json                # primary command
+npx spectruth audit --task <id> --json    # one task
+npx spectruth audit --deterministic --json # CLI-only, no model needed
+npx spectruth demo                        # self-contained demo
+npx spectruth init                        # install skill + agent + hooks
 ```
-
-Once the package is installed or published these become `npx spectruth audit`
-and so on.
-
-## How to respond to a user
-
-When the user asks whether work is done, whether a task is complete, or whether
-something is ready to ship:
-
-1. Run `audit --json` (add `--task <id>` when they named a task).
-2. Lead with the ship decision and the task it applies to.
-3. For each non-`SUPPORTED` criterion, give the state, the justification, and
-   the concrete gap. Cite file and line when the evidence has a location.
-4. Never restate a finding as more certain than its state. `UNVERIFIED` means
-   unproven, not failing.
-5. If the audit reports skipped tasks with no requirement reference, say so
-   plainly rather than implying they passed.
-
-Do not run `pre-task` or `post-task` to answer a question. Those exist for the
-observed-transition flow, and `post-task` fails without a prior snapshot.
-
-## Repair previews require explicit approval
-
-The audit already generates previews for every blocking finding and prints their
-ids. It changes nothing while doing so.
-
-When the user asks you to fix a finding:
-
-1. Show the preview: its id, the affected criterion, the evidence gap, the
-   proposed change, and the evidence expected afterwards.
-2. State plainly that nothing has been changed.
-3. Ask for explicit approval in a separate turn. Stop there and wait.
-4. Once the user approves, run `approve --report <reportId> --preview <previewId>`
-   to record consent, then implement **only** the authorized scope.
-5. Never modify `tasks.md`, and never mark a task complete. The completion claim
-   belongs to the user; your job is the code change they approved.
-6. Re-run `audit --task <id>` afterwards so the repair is verified independently
-   rather than assumed. Report whether the gap actually closed — if the criterion
-   is still not `SUPPORTED`, say so instead of claiming success.
-
-An approval is bound to one preview, one report, and the state of the files at
-the moment it was granted. If the report or those files have changed, the
-approval is refused and you must ask again.
-
-If the user has not approved, the correct action is to stop and wait.
 
 ## Exit-code contract
 
-`BLOCKED` is a domain result, not a tooling error: the hooks exit `0` for every
-ship decision so the summary reaches Kiro's context. A non-zero exit means an
-operational problem such as a missing snapshot, an unreadable spec, or task
-inference that could not identify exactly one completed task.
+`BLOCKED` is a domain result, not a tooling error. The CLI exits `0` for every
+ship decision so its output reaches your context. A non-zero exit means an
+operational problem (missing spec, unreadable file, ambiguous task inference).

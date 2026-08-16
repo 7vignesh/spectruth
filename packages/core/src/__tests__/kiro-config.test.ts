@@ -204,33 +204,43 @@ describe('SpecTruth agent skill', () => {
     expect(skill).toMatch(/authorization[\s\S]{0,200}UNSUPPORTED/i);
   });
 
-  it('requires explicit approval in a separate turn before any repair', () => {
-    expect(skill).toMatch(/explicit approval in a separate turn/i);
+  it('requires explicit approval before any repair', () => {
     expect(skill).toMatch(/nothing has been changed/i);
     expect(skill).toMatch(/never modify `tasks\.md`/i);
-    expect(skill).toMatch(/re-run [^\n]*audit --task/i);
+    expect(skill).toMatch(/re-run [^\n]*audit/i);
+    expect(skill).toMatch(/ask for approval and \*\*stop\*\*/i);
   });
 
   it('documents the audit command as the primary entry point', () => {
     expect(skill).toMatch(/audit --json/);
     expect(skill).toMatch(/audit --task/);
-    expect(skill).toMatch(/needs no snapshot/i);
   });
 
-  it('documents that approval is bound and can be refused', () => {
-    expect(skill).toMatch(/bound to one preview/i);
-    expect(skill).toMatch(/approval is refused/i);
+  it('documents the two-layer adjudication flow', () => {
+    expect(skill).toMatch(/evidence collection/i);
+    expect(skill).toMatch(/agent adjudication/i);
+    expect(skill).toMatch(/UNVERIFIED.*adjudication is required/i);
+    expect(skill).toMatch(/never override a CLI.*UNSUPPORTED/i);
+  });
+
+  it('documents that approval scope is limited', () => {
+    expect(skill).toMatch(/one repair for one criterion/i);
   });
 
   it('documents the exit-code contract for a blocked decision', () => {
-    expect(skill).toMatch(/is a domain result, not a tooling error/i);
-    expect(skill).toMatch(/exit `0`/);
+    expect(skill).toMatch(/domain result, not a/i);
+    expect(skill).toMatch(/exits `0`/);
   });
 
-  it('carries no confidence or completion-score language', () => {
-    expect(skill).not.toMatch(/confidence/i);
+  it('prohibits confidence scores and binary verdicts', () => {
+    // The skill may mention these words only as prohibitions ("Never use...").
+    // It must not instruct the agent to produce them.
+    expect(skill).toMatch(/never use.*confidence/i);
     expect(skill).not.toMatch(/\b\d+%/);
-    expect(skill).not.toMatch(/\bPASS\b|\bFAIL\b/);
+    // The four states are SUPPORTED/PARTIAL/UNSUPPORTED/UNVERIFIED, never PASS/FAIL.
+    expect(skill).toContain('SUPPORTED');
+    expect(skill).not.toMatch(/state.*\bPASS\b/i);
+    expect(skill).not.toMatch(/state.*\bFAIL\b/i);
   });
 });
 
