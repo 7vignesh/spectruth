@@ -97,6 +97,10 @@ and static checks. Run it twice offline and the output is byte-identical. An
 agent cannot argue its way past it.
 
 On fidelity scores specifically, see the first design decision below.
+and static checks. Run it twice offline and the output is byte-identical. An
+agent cannot argue its way past it.
+
+On fidelity scores specifically, see the first design decision below.
 
 ---
 
@@ -138,20 +142,27 @@ either cries wolf or hides risk.
 A state with no reason is not auditable. The domain constructor rejects an empty
 justification at runtime — there is no path to a finding without one.
 
-### 4. Deterministic first; the model is optional
+### 4. Two layers: deterministic evidence, then agent adjudication
 
-Static evidence produces the verdict. If `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
-is present, a provider adjudicates *within a bounded evidence bundle* and may
-refine the result — but the default path uses no model at all, and the output
-says so:
+The CLI collects evidence deterministically — status codes, named libraries,
+route definitions, numeric limits. It catches what can be proven by pattern
+matching, instantly and reproducibly.
+
+For criteria the CLI cannot prove (like "persist to the database and enqueue a
+job"), the result is `UNVERIFIED` rather than a guess. That state is the handoff
+signal: the Kiro agent reads the relevant source itself and adjudicates using the
+model the user already has — no separate API key, no extra cost.
 
 ```text
-Verdict computed from static evidence only. No model was used.
+CLI evidence:    SUPPORTED · UNSUPPORTED · PARTIAL · UNVERIFIED
+                                                        ↓
+Agent adjudication (for UNVERIFIED only):    reads source → final verdict
 ```
 
-This is the core architectural bet. The engine decides; the agent explains. If
-the model produced the verdict, this would be a careful prompt rather than a
-gate.
+The agent may only resolve `UNVERIFIED`. It cannot override a CLI `UNSUPPORTED`
+— the CLI proved absence, and the agent does not get to argue with proof. This
+separation is what makes the product an evidence-based gate rather than another
+LLM wrapper.
 
 ### 5. Missing security enforcement is `UNSUPPORTED`, never `UNVERIFIED`
 
@@ -230,12 +241,13 @@ missing snapshot, ambiguous task inference. A blocked ship is the tool working.
 Test output is optional evidence. Its absence may leave a criterion `UNVERIFIED`,
 but it never prevents the audit from running or from reaching a decision.
 
-### 15. Kiro is the interface; the CLI is the engine
+### 15. Kiro is the interface; the CLI is the evidence layer
 
 No dashboard, no web app for the tool itself. The user talks to the agent; the
-agent runs the deterministic engine and explains the result. Keeping all logic in
-`spectruth-core` means the CLI, the hooks, and any future MCP server are thin
-callers over the same functions.
+agent runs the deterministic engine, adjudicates what the engine cannot prove,
+and explains the combined result. Keeping all logic in `spectruth-core` means
+the CLI, the hooks, and any future MCP server are thin callers over the same
+functions.
 
 ---
 
@@ -305,7 +317,13 @@ transition inference       exactly one incomplete → complete, or refuse
 evidence bundle            linked criteria · design context · git diff
                            source snippets · static checks · optional tests
         ↓
-adjudication               deterministic first, bounded model optional
+CLI adjudication           deterministic: status codes, libraries, limits
+                           result per criterion: SUPPORTED · UNSUPPORTED ·
+                           PARTIAL · UNVERIFIED
+        ↓
+agent adjudication         for UNVERIFIED only: reads source, cites evidence,
+                           applies the same rules — using the model you already
+                           have, no extra API key
         ↓
 ship decision              READY · REVIEW_REQUIRED · BLOCKED
         ↓
@@ -331,10 +349,13 @@ project being audited.
   the correct schema and will work if that behaviour changes.
 - **Deterministic checks are pattern-based.** They detect concrete signals such
   as status codes, route definitions and auth keywords. They are strong at
-  catching *absence* and weaker at catching a *wrong* implementation.
+  catching *absence* and weaker at catching a *wrong* implementation. Criteria
+  the CLI cannot prove are marked `UNVERIFIED` and handed to the Kiro agent for
+  adjudication — no separate API key required.
 - **Without a provider, expect `UNVERIFIED` on criteria that need judgement.**
-  That is the honest state, not a failure — but run `npx spectruth demo` before
-  running it on an arbitrary project, so the vocabulary is familiar first.
+  That is the honest state, not a failure — and it is the signal for the agent
+  to read the source and decide. Run `npx spectruth demo` before running it on
+  an arbitrary project, so the vocabulary is familiar first.
 - **Tasks must reference requirements.** A task with no `_Requirements:_` footer
   has nothing to audit against, and is reported as skipped rather than passed.
 
@@ -390,7 +411,7 @@ docs/             integration findings
 .kiro/            this project's own spec, skill, agent and hooks
 ```
 
-338 tests cover the domain model, ship policy, spec parsing, transition
+345 tests cover the domain model, ship policy, spec parsing, transition
 inference, evidence bundles, adjudication, the repair cycle, and the shipped Kiro
 configuration.
 

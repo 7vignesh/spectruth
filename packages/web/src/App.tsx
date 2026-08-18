@@ -102,12 +102,12 @@ function Hero() {
             <Reveal delay={120}>
               <p className="mt-6 max-w-lg text-lg leading-relaxed text-text-muted">
                 SpecTruth audits completed Kiro tasks against their acceptance
-                criteria, git diff, and repository evidence — then returns a
-                deterministic{' '}
+                criteria — deterministic evidence first, then Kiro-assisted
+                adjudication for anything the CLI cannot prove. No extra API key.
+                Ship decision:{' '}
                 <span className="font-mono text-supported">READY</span>,{' '}
                 <span className="font-mono text-partial">REVIEW_REQUIRED</span>, or{' '}
-                <span className="font-mono text-unsupported">BLOCKED</span>{' '}
-                decision.
+                <span className="font-mono text-unsupported">BLOCKED</span>.
               </p>
             </Reveal>
 
@@ -222,20 +222,20 @@ function Workflow() {
       desc: 'Kiro implements a task and marks it complete.',
     },
     {
-      label: 'AUDIT',
-      desc: 'SpecTruth gathers repository evidence, git diff, and source snapshots.',
+      label: 'EVIDENCE',
+      desc: 'The CLI scans deterministically — status codes, libraries, route definitions, limits.',
+    },
+    {
+      label: 'ADJUDICATE',
+      desc: 'For anything the CLI cannot prove, the Kiro agent reads the source and decides. No extra API key.',
     },
     {
       label: 'DECIDE',
-      desc: 'Evidence produces READY, REVIEW_REQUIRED, or BLOCKED.',
+      desc: 'Combined evidence produces READY, REVIEW_REQUIRED, or BLOCKED.',
     },
     {
       label: 'REPAIR',
-      desc: 'A non-mutating repair preview is shown. Nothing changes.',
-    },
-    {
-      label: 'SHIP',
-      desc: 'You approve, Kiro repairs, and SpecTruth re-audits.',
+      desc: 'You approve a preview, Kiro implements, SpecTruth re-audits.',
     },
   ];
 
@@ -447,20 +447,21 @@ function WhyNotTestsOrReview() {
 function KiroIntegration() {
   const points = [
     'Kiro specs provide requirements, design, and task plans.',
-    'PreTaskExec / PostTaskExec snapshots detect task completion transitions.',
-    'The deterministic CLI produces machine-readable and terminal reports.',
-    'Repairs are previewed and require explicit approval.',
-    'Hooks succeed even when the domain verdict is BLOCKED (exit 0).',
+    'The CLI collects deterministic evidence — status codes, named libraries, numeric limits.',
+    'For criteria the CLI cannot prove, the Kiro agent reads the source and adjudicates.',
+    'No separate API key — the model doing the work is the one you already have.',
+    'Repairs are previewed and require explicit approval before anything changes.',
   ];
 
   return (
     <Section id="kiro">
       <Reveal>
         <Eyebrow>Kiro integration</Eyebrow>
-        <Heading>Built into Kiro's spec workflow.</Heading>
+        <Heading>Deterministic evidence. Kiro-assisted adjudication.</Heading>
         <Lede>
-          SpecTruth installs as an Agent Skill, a custom agent, and paired task
-          hooks — one command, and the audit is available in every conversation.
+          The CLI catches what pattern matching can prove. For everything else,
+          the Kiro agent reads the source itself — using the model you already
+          have. No extra API key, no extra cost.
         </Lede>
       </Reveal>
 
@@ -478,10 +479,10 @@ function KiroIntegration() {
       <Reveal delay={200}>
         <div className="mt-9 rounded-xl border border-brand/40 bg-brand-dim p-6">
           <p className="text-base leading-relaxed text-text">
-            <span className="font-mono text-brand">Honest caveat:</span> IDE task
-            execution delegates to an internal subagent and does not invoke
-            external hooks. SpecTruth is therefore agent-initiated — you ask, it
-            audits. The hooks ship and will activate if those triggers fire.
+            <span className="font-mono text-brand">How it activates:</span> SpecTruth
+            is agent-initiated — you ask, it audits. Install with{' '}
+            <code className="text-brand">npx spectruth init</code>, then ask the
+            agent whether a task is actually done.
           </p>
           <a
             href={SPIKE}
@@ -497,7 +498,7 @@ function KiroIntegration() {
       <Reveal delay={240}>
         <div className="mt-8 rounded-lg border border-edge bg-ink-raised p-5">
           <p className="font-mono text-sm text-text-faint">
-            Built for the Ready, Spec, Ship hackathon · spec-first · 338 tests
+            Built for the Ready, Spec, Ship hackathon · spec-first · 345 tests
           </p>
         </div>
       </Reveal>
