@@ -236,9 +236,20 @@ function adjudicateDeterministically(
   } else if (specificFound.length > 0 && missing.length === 0) {
     state = 'SUPPORTED';
     justification = `Deterministic checks confirm the criterion: ${specificFound.map(f => f.detail).join('; ')}.`;
-  } else if (found.length > 0 && missing.length > 0) {
+  } else if (specificFound.length > 0 && missing.length > 0) {
+    // At least one specific check passed (proving part of the criterion) and
+    // another check failed — the criterion is genuinely partially met.
     state = 'PARTIAL';
     justification = `Some checks pass (${found.map(f => f.detail).join('; ')}), but others do not (${missing.map(f => f.detail).join('; ')}).`;
+  } else if (found.length > 0 && missing.length > 0) {
+    // Both findings are corroborating — tangential signals that never tested
+    // the criterion's actual requirement. "Found a .env" and "didn't find
+    // nodemailer" says nothing about whether idempotency keys are assigned.
+    state = 'UNVERIFIED';
+    justification =
+      `Only corroborating evidence was found (${found.map(f => f.detail).join('; ')}), `
+      + `while other corroborating checks did not match (${missing.map(f => f.detail).join('; ')}). `
+      + 'Neither tested the behavior the criterion requires. Agent adjudication is needed.';
   } else if (onlyCorroborating) {
     state = 'UNVERIFIED';
     justification =
