@@ -101,10 +101,11 @@ function Hero() {
 
             <Reveal delay={120}>
               <p className="mt-6 max-w-lg text-lg leading-relaxed text-text-muted">
-                SpecTruth audits completed Kiro tasks against their acceptance
-                criteria — deterministic evidence first, then Kiro-assisted
-                adjudication for anything the CLI cannot prove. No extra API key.
-                Ship decision:{' '}
+                SpecTruth audits completed{' '}
+                <span className="text-text">Kiro spec tasks</span> against their
+                acceptance criteria — deterministic evidence first, then
+                Kiro-assisted adjudication for anything the CLI cannot prove.
+                No extra API key. Ship decision:{' '}
                 <span className="font-mono text-supported">READY</span>,{' '}
                 <span className="font-mono text-partial">REVIEW_REQUIRED</span>, or{' '}
                 <span className="font-mono text-unsupported">BLOCKED</span>.
@@ -115,13 +116,14 @@ function Hero() {
               <div className="mt-8 max-w-md">
                 <Command value="npx spectruth@latest audit" />
                 <p className="mt-3 font-mono text-sm text-text-faint">
-                  Run an audit — no API key required.
+                  For projects built with Kiro specs. No API key required.
                 </p>
               </div>
             </Reveal>
 
             <Reveal delay={220}>
               <div className="mt-6 flex flex-wrap items-center gap-2.5">
+                <Pill>Kiro projects only</Pill>
                 <Pill>no confidence scores</Pill>
                 <Pill>no automatic edits</Pill>
                 <Pill>MIT</Pill>
