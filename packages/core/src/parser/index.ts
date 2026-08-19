@@ -49,7 +49,7 @@ function extractRequirements(markdown: string): Requirement[] {
   const requirements: Requirement[] = [];
 
   // Match each requirement block: ### Requirement N ... (until next ### Requirement or end)
-  const reqPattern = /###\s+Requirement\s+(\d+)\s*\n([\s\S]*?)(?=\n###\s+Requirement\s+\d+|$)/g;
+  const reqPattern = /###\s+Requirement\s+(\d+)[^\n]*\n([\s\S]*?)(?=\n###\s+Requirement\s+\d+|$)/g;
   let match: RegExpExecArray | null;
 
   while ((match = reqPattern.exec(markdown)) !== null) {
