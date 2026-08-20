@@ -1,6 +1,6 @@
 {
   "name": "spectruth",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Done Integrity ship gate for Kiro — checks whether a task marked complete is actually supported by evidence",
   "type": "module",
   "bin": {
