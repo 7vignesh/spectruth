@@ -516,16 +516,33 @@ function Proof() {
       <Reveal>
         <Eyebrow>Live demo</Eyebrow>
         <Heading>
-          Same file, same spec — two different answers.
+          See it work.
         </Heading>
         <Lede>
-          Task 1 is truly done. Task 2 is not. Toggle to see the evidence.
+          Three minutes. A task marked complete, the audit refusing it, and the approved repair being verified.
         </Lede>
       </Reveal>
 
-      <div className="mt-10">
-        <AuditReplay />
-      </div>
+      <Reveal delay={60}>
+        <div className="mt-10 overflow-hidden rounded-xl border border-edge">
+          <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0 }}>
+            <iframe
+              src="https://www.loom.com/embed/f191ac4795cd4bbdb07e2e2c622779f1"
+              frameBorder="0"
+              allowFullScreen
+              style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+              title="SpecTruth Demo"
+            />
+          </div>
+        </div>
+      </Reveal>
+
+      <Reveal delay={120}>
+        <div className="mt-10">
+          <p className="font-mono text-sm text-text-faint mb-4">Interactive preview: toggle between BLOCKED and READY</p>
+          <AuditReplay />
+        </div>
+      </Reveal>
 
       <Reveal delay={80}>
         <div className="mt-8 grid gap-5 sm:grid-cols-3">
