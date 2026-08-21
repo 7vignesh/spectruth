@@ -65,7 +65,7 @@ export function formatInitResult(result: InitResult): string {
   lines.push('  1. Reload Kiro so it picks up the skill and agent.');
   lines.push('  2. Ask the agent: "is my last completed task actually done?"');
   lines.push('');
-  lines.push('Or audit straight away:  npx spectruth');
+  lines.push('Or audit straight away:  npx spectruth audit');
 
   return `${lines.join('\n')}\n`;
 }
